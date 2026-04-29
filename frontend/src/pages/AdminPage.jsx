@@ -7,20 +7,20 @@ import { getDepartamentos, getConfig, updateConfig, subirCSV, buscarProductos, g
 function ConfigTab() {
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [cfg, setCfg]            = useState({ factor_ajuste: '', dias_seguridad_defecto: '' })
+  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '' })
   const [msg, setMsg]            = useState(null)
   const [loading, setLoading]    = useState(false)
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
   useEffect(() => {
     if (!depSel) return
-    getConfig(depSel).then(c => setCfg({ factor_ajuste: c.factor_ajuste, dias_seguridad_defecto: c.dias_seguridad_defecto }))
+    getConfig(depSel).then(c => setCfg({ dias_produccion_semana: c.dias_produccion_semana, dias_seguridad_defecto: c.dias_seguridad_defecto }))
   }, [depSel])
 
   const guardar = async () => {
     setLoading(true); setMsg(null)
     try {
-      await updateConfig(depSel, { factor_ajuste: parseFloat(cfg.factor_ajuste), dias_seguridad_defecto: parseInt(cfg.dias_seguridad_defecto) })
+      await updateConfig(depSel, { dias_produccion_semana: parseInt(cfg.dias_produccion_semana), dias_seguridad_defecto: parseInt(cfg.dias_seguridad_defecto) })
       setMsg({ ok: true, texto: 'Guardado correctamente' })
     } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
     finally { setLoading(false) }
@@ -38,21 +38,23 @@ function ConfigTab() {
       {depSel && (
         <div className="card p-5 space-y-4 animate-slide-up">
           <div>
-            <label className="label">Factor de Ajuste <span className="text-gray-500 font-normal text-xs">(default 1.2857 = 9/7)</span></label>
-            <input id="cfg-factor" type="number" step="0.0001" value={cfg.factor_ajuste}
-              onChange={e => setCfg(c => ({ ...c, factor_ajuste: e.target.value }))} className="input-field" />
+            <label className="label">Días de Producción / Semana <span className="text-gray-500 font-normal text-xs">(default 6 = Lunes a Sábado)</span></label>
+            <input id="cfg-dias-prod" type="number" min={1} max={7} value={cfg.dias_produccion_semana}
+              onChange={e => setCfg(c => ({ ...c, dias_produccion_semana: e.target.value }))} className="input-field" />
           </div>
           <div>
-            <label className="label">Días Seguridad Defecto <span className="text-gray-500 font-normal text-xs">(auto: {">"} 20 uds/día → 1, si no → 2)</span></label>
-            <input id="cfg-dias" type="number" min={0} value={cfg.dias_seguridad_defecto}
+            <label className="label">Días Seguridad Defecto <span className="text-gray-500 font-normal text-xs">(auto: {">"}20 uds/día → 1, si no → 2)</span></label>
+            <input id="cfg-dias-seg" type="number" min={0} value={cfg.dias_seguridad_defecto}
               onChange={e => setCfg(c => ({ ...c, dias_seguridad_defecto: e.target.value }))} className="input-field" />
           </div>
           <div className="bg-gray-900 rounded-xl p-3 text-xs font-mono text-gray-400 space-y-1 border border-gray-700/40">
-            <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Lógica de Negocio</p>
+            <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Lógica de Negocio — Lotes de Producción</p>
             <p>venta_diaria = ventas / dias_historial</p>
-            <p>días_seg = override ?? (venta_diaria {">"} 20 ? 1 : 2)</p>
-            <p>demanda = (venta_diaria × <span className="text-yellow-400">{cfg.factor_ajuste}</span>) × (1 + días_seg)</p>
-            <p className="text-white">requerimiento = stock_sala − demanda</p>
+            <p>días_prod = override ?? <span className="text-yellow-400">{cfg.dias_produccion_semana}</span> (días/semana)</p>
+            <p>lote_base = (venta_diaria × 7) / días_prod</p>
+            <p>stock_seg = venta_diaria × (override ?? venta_diaria {">"}20 ? 1 : 2)</p>
+            <p>demanda = lote_base + stock_seg</p>
+            <p className="text-white">requerimiento = demanda − stock_sala → Math.ceil()</p>
           </div>
           {msg && <p className={`text-sm text-center font-medium rounded-lg p-2 ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
           <button id="btn-guardar-cfg" onClick={guardar} disabled={loading} className="btn-primary w-full disabled:opacity-50">
@@ -138,7 +140,7 @@ function ProductosTab() {
   const [q, setQ]                = useState('')
   const [resultados, setRes]     = useState([])
   const [seleccionado, setSel]   = useState(null)
-  const [form, setForm]          = useState({ pro_codigo_barra: '', pro_dias_seguridad_override: '' })
+  const [form, setForm]          = useState({ pro_codigo_barra: '', pro_dias_produccion_override: '', pro_dias_seguridad_override: '' })
   const [msg, setMsg]            = useState(null)
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
@@ -151,7 +153,11 @@ function ProductosTab() {
   const seleccionar = async (p) => {
     const det = await getProducto(p.pro_codigo_plu)
     setSel(det)
-    setForm({ pro_codigo_barra: det.pro_codigo_barra || '', pro_dias_seguridad_override: det.pro_dias_seguridad_override ?? '' })
+    setForm({
+      pro_codigo_barra:            det.pro_codigo_barra            || '',
+      pro_dias_produccion_override: det.pro_dias_produccion_override ?? '',
+      pro_dias_seguridad_override:  det.pro_dias_seguridad_override  ?? '',
+    })
     setMsg(null)
   }
 
@@ -211,7 +217,13 @@ function ProductosTab() {
             <input type="text" value={form.pro_codigo_barra} onChange={e => setForm(f => ({ ...f, pro_codigo_barra: e.target.value }))} className="input-field" placeholder="(opcional)" />
           </div>
           <div>
-            <label className="label">Override Días de Seguridad <span className="text-gray-500 font-normal text-xs">(dejar vacío = lógica automática)</span></label>
+            <label className="label">Override Días Producción/Semana <span className="text-gray-500 font-normal text-xs">(vacío = usar config depto)</span></label>
+            <input type="number" min={1} max={7} value={form.pro_dias_produccion_override}
+              onChange={e => setForm(f => ({ ...f, pro_dias_produccion_override: e.target.value }))}
+              className="input-field" placeholder="Ej: 2, 3… Vacío = default depto" />
+          </div>
+          <div>
+            <label className="label">Override Días de Seguridad <span className="text-gray-500 font-normal text-xs">(vacío = lógica automática)</span></label>
             <input type="number" min={0} value={form.pro_dias_seguridad_override}
               onChange={e => setForm(f => ({ ...f, pro_dias_seguridad_override: e.target.value }))}
               className="input-field" placeholder="Vacío = auto" />

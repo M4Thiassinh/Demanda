@@ -1,38 +1,58 @@
 /**
- * Motor de Cálculo de Demanda v2 — Teja Market
+ * Motor de Cálculo de Demanda v3 — Teja Market
+ * Lógica de Lotes de Producción Semanales
  *
- * Prioridad de días de seguridad:
- *   1. pro_dias_seguridad_override (si tiene valor)
- *   2. Auto: venta_diaria > 20 → 1 día | <= 20 → 2 días
+ * Paso A: venta_diaria = vta_total_periodo / dias_historial
+ *
+ * Paso B: Parámetros efectivos (override > automático)
+ *   dias_prod_efectivo: pro_dias_produccion_override ?? config.dias_produccion_semana
+ *   dias_seg_efectivo:  pro_dias_seguridad_override  ?? (venta_diaria > 20 ? 1 : 2)
+ *
+ * Paso C: Ecuación final
+ *   lote_produccion_base    = (venta_diaria × 7) / dias_prod_efectivo
+ *   stock_seguridad_calculado = venta_diaria × dias_seg_efectivo
+ *   demanda_total_requerida  = lote_produccion_base + stock_seguridad_calculado
+ *   requerimiento_a_producir = demanda_total_requerida - det_stock_sala
+ *   → Si <= 0: no se produce. Si > 0: Math.ceil()
  */
 function calcularDemanda(config, producto, stockSala) {
-  const { factor_ajuste } = config;
-  const { vta_total_periodo, dias_historial, pro_dias_seguridad_override } = producto;
+  const { dias_produccion_semana } = config;
+  const {
+    vta_total_periodo,
+    dias_historial,
+    pro_dias_produccion_override,
+    pro_dias_seguridad_override,
+  } = producto;
 
-  const ventaDiariaLD = vta_total_periodo / dias_historial;
+  // ── Paso A ────────────────────────────────────────────────
+  const ventaDiaria = vta_total_periodo / dias_historial;
 
-  // Determinación dinámica de días de seguridad
-  let diasSeguridad;
-  if (pro_dias_seguridad_override !== null && pro_dias_seguridad_override !== undefined) {
-    diasSeguridad = parseInt(pro_dias_seguridad_override, 10);
-  } else {
-    diasSeguridad = ventaDiariaLD > 20 ? 1 : 2;
-  }
+  // ── Paso B ────────────────────────────────────────────────
+  const diasProdEfectivo = (pro_dias_produccion_override !== null && pro_dias_produccion_override !== undefined)
+    ? parseInt(pro_dias_produccion_override, 10)
+    : dias_produccion_semana;
 
-  const ventaDiariaAjustada = ventaDiariaLD * factor_ajuste;
-  const stockSeguridad      = ventaDiariaAjustada * diasSeguridad;
-  const demandaPrimaria     = ventaDiariaAjustada + stockSeguridad;
-  const requerimiento       = stockSala - demandaPrimaria;
-  const hayQuiebre          = requerimiento < 0;
-  const cantidadAProducir   = hayQuiebre ? Math.ceil(Math.abs(requerimiento)) : 0;
+  const diasSegEfectivo = (pro_dias_seguridad_override !== null && pro_dias_seguridad_override !== undefined)
+    ? parseInt(pro_dias_seguridad_override, 10)
+    : (ventaDiaria > 20 ? 1 : 2);
+
+  // ── Paso C ────────────────────────────────────────────────
+  const loteProduccionBase      = (ventaDiaria * 7) / diasProdEfectivo;
+  const stockSeguridadCalculado = ventaDiaria * diasSegEfectivo;
+  const demandaTotalRequerida   = loteProduccionBase + stockSeguridadCalculado;
+  const requerimientoRaw        = demandaTotalRequerida - stockSala;
+
+  const hayQuiebre        = requerimientoRaw > 0;
+  const cantidadAProducir = hayQuiebre ? Math.ceil(requerimientoRaw) : 0;
 
   return {
-    ventaDiariaLD:       r4(ventaDiariaLD),
-    ventaDiariaAjustada: r4(ventaDiariaAjustada),
-    diasSeguridad,
-    stockSeguridad:      r4(stockSeguridad),
-    demandaPrimaria:     r4(demandaPrimaria),
-    requerimiento:       r4(requerimiento),
+    ventaDiaria:              r4(ventaDiaria),
+    diasProdEfectivo,
+    diasSegEfectivo,
+    loteProduccionBase:       r4(loteProduccionBase),
+    stockSeguridadCalculado:  r4(stockSeguridadCalculado),
+    demandaTotalRequerida:    r4(demandaTotalRequerida),
+    requerimiento:            r4(requerimientoRaw),
     hayQuiebre,
     cantidadAProducir,
   };

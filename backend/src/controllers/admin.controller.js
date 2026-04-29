@@ -1,7 +1,8 @@
-const db           = require('../config/db');
-const ConfigService = require('../services/ConfigService');
-const CsvImport     = require('../services/CsvImportService');
+const db            = require('../config/db');
+const ConfigService  = require('../services/ConfigService');
+const CsvImport      = require('../services/CsvImportService');
 const { generarExcel } = require('../services/EmailService');
+const { calcularDemanda } = require('../services/DemandCalculatorService');
 
 // GET /api/departamentos
 async function listarDepartamentos(req, res) {
@@ -21,17 +22,14 @@ async function listarUsuarios(req, res) {
 
 // GET /api/admin/config/:depId
 async function obtenerConfig(req, res) {
-  try {
-    res.json(await ConfigService.getConfig(req.params.depId));
-  } catch (err) { res.status(404).json({ error: err.message }); }
+  try { res.json(await ConfigService.getConfig(req.params.depId)); }
+  catch (err) { res.status(404).json({ error: err.message }); }
 }
 
 // PUT /api/admin/config/:depId
 async function actualizarConfig(req, res) {
-  try {
-    await ConfigService.updateConfig(req.params.depId, req.body);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  try { await ConfigService.updateConfig(req.params.depId, req.body); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 }
 
 // POST /api/admin/csv-upload
@@ -45,7 +43,7 @@ async function subirCSV(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// GET /api/productos?dep_id=22&q=kuchen  (busca por PLU, barra o nombre)
+// GET /api/productos?dep_id=22&q=kuchen
 async function buscarProductos(req, res) {
   try {
     const { dep_id, q = '' } = req.query;
@@ -53,7 +51,8 @@ async function buscarProductos(req, res) {
     const b = `%${q}%`;
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
-              vta_total_periodo, dias_historial, pro_dias_seguridad_override
+              vta_total_periodo, dias_historial,
+              pro_dias_produccion_override, pro_dias_seguridad_override
          FROM productos
         WHERE dep_id = ?
           AND (pro_nombre_producto LIKE ? OR pro_codigo_plu LIKE ? OR pro_codigo_barra LIKE ?)
@@ -64,12 +63,13 @@ async function buscarProductos(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// GET /api/admin/productos/:plu  — detalle de un producto para edición
+// GET /api/admin/productos/:plu
 async function obtenerProducto(req, res) {
   try {
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
-              vta_total_periodo, dias_historial, dep_id, pro_dias_seguridad_override
+              vta_total_periodo, dias_historial, dep_id,
+              pro_dias_produccion_override, pro_dias_seguridad_override
          FROM productos WHERE pro_codigo_plu = ?`,
       [req.params.plu]
     );
@@ -78,44 +78,41 @@ async function obtenerProducto(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// PUT /api/admin/productos/:plu  — editar barra + override
+// PUT /api/admin/productos/:plu
 async function actualizarProducto(req, res) {
   try {
-    const { pro_codigo_barra, pro_dias_seguridad_override } = req.body;
+    const { pro_codigo_barra, pro_dias_produccion_override, pro_dias_seguridad_override } = req.body;
+    const toNull = (v) => (v === '' || v === undefined || v === null) ? null : parseInt(v, 10);
     await db.query(
       `UPDATE productos
-          SET pro_codigo_barra           = COALESCE(?, pro_codigo_barra),
-              pro_dias_seguridad_override = ?
+          SET pro_codigo_barra              = COALESCE(?, pro_codigo_barra),
+              pro_dias_produccion_override  = ?,
+              pro_dias_seguridad_override   = ?
         WHERE pro_codigo_plu = ?`,
-      [
-        pro_codigo_barra ?? null,
-        pro_dias_seguridad_override === '' ? null : (pro_dias_seguridad_override ?? null),
-        req.params.plu,
-      ]
+      [pro_codigo_barra ?? null, toNull(pro_dias_produccion_override), toNull(pro_dias_seguridad_override), req.params.plu]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// GET /api/admin/export?dep_id=22&fecha_ini=2026-04-01&fecha_fin=2026-04-30
-// Descarga Excel consolidado de todas las revisiones completadas en el rango
+// GET /api/admin/export
 async function exportarExcel(req, res) {
   try {
     const { dep_id, fecha_ini, fecha_fin } = req.query;
-
     const { rows } = await db.query(
       `SELECT r.rev_folio, r.rev_fecha, d.dep_nombre,
               COALESCE(u.usu_nombre,'Operador') AS usu_nombre,
               dr.pro_codigo_plu, p.pro_codigo_barra, p.pro_nombre_producto,
               dr.det_stock_sala,
-              p.vta_total_periodo, p.dias_historial, p.pro_dias_seguridad_override,
-              c.factor_ajuste
+              p.vta_total_periodo, p.dias_historial,
+              p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
+              c.dias_produccion_semana
          FROM revisiones r
-         JOIN departamentos d   ON d.dep_id = r.dep_id
-         LEFT JOIN usuarios u   ON u.usu_id = r.usu_id
+         JOIN departamentos d    ON d.dep_id = r.dep_id
+         LEFT JOIN usuarios u    ON u.usu_id = r.usu_id
          JOIN detalle_revision dr ON dr.rev_id = r.rev_id
-         JOIN productos p        ON p.pro_codigo_plu = dr.pro_codigo_plu
-         JOIN configuraciones c  ON c.dep_id = r.dep_id
+         JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu
+         JOIN configuraciones c   ON c.dep_id = r.dep_id
         WHERE r.rev_estado = 'completada'
           AND (? IS NULL OR r.dep_id = ?)
           AND (? IS NULL OR DATE(r.rev_fecha) >= ?)
@@ -126,13 +123,12 @@ async function exportarExcel(req, res) {
        fecha_fin || null, fecha_fin || null]
     );
 
-    const { calcularDemanda } = require('../services/DemandCalculatorService');
-
-    // Calcular requerimiento para cada línea
     const lineas = rows.map((row) => {
       const calc = calcularDemanda(
-        { factor_ajuste: row.factor_ajuste },
-        { vta_total_periodo: row.vta_total_periodo, dias_historial: row.dias_historial, pro_dias_seguridad_override: row.pro_dias_seguridad_override },
+        { dias_produccion_semana: row.dias_produccion_semana },
+        { vta_total_periodo: row.vta_total_periodo, dias_historial: row.dias_historial,
+          pro_dias_produccion_override: row.pro_dias_produccion_override,
+          pro_dias_seguridad_override:  row.pro_dias_seguridad_override },
         row.det_stock_sala
       );
       return { ...row, ...calc };
@@ -143,16 +139,19 @@ async function exportarExcel(req, res) {
     const ws = wb.addWorksheet('Consolidado');
 
     ws.columns = [
-      { header: 'Folio',        key: 'rev_folio',           width: 22 },
-      { header: 'Fecha',        key: 'rev_fecha',           width: 20 },
-      { header: 'Usuario',      key: 'usu_nombre',          width: 14 },
-      { header: 'Departamento', key: 'dep_nombre',          width: 14 },
-      { header: 'PLU',          key: 'pro_codigo_plu',      width: 12 },
-      { header: 'Código Barra', key: 'pro_codigo_barra',    width: 16 },
-      { header: 'Producto',     key: 'pro_nombre_producto', width: 42 },
-      { header: 'Stock Sala',   key: 'det_stock_sala',      width: 12 },
-      { header: 'Requerimiento',key: 'requerimiento',       width: 15 },
-      { header: 'A Reponer',    key: 'cantidadAProducir',   width: 12 },
+      { header: 'Folio',          key: 'rev_folio',              width: 22 },
+      { header: 'Fecha',          key: 'rev_fecha',              width: 20 },
+      { header: 'Usuario',        key: 'usu_nombre',             width: 14 },
+      { header: 'Departamento',   key: 'dep_nombre',             width: 14 },
+      { header: 'PLU',            key: 'pro_codigo_plu',         width: 12 },
+      { header: 'Código Barra',   key: 'pro_codigo_barra',       width: 16 },
+      { header: 'Producto',       key: 'pro_nombre_producto',    width: 40 },
+      { header: 'Stock Sala',     key: 'det_stock_sala',         width: 12 },
+      { header: 'Venta Diaria',   key: 'ventaDiaria',            width: 13 },
+      { header: 'Lote Base',      key: 'loteProduccionBase',     width: 13 },
+      { header: 'Stock Seg.',     key: 'stockSeguridadCalculado',width: 13 },
+      { header: 'Demanda Total',  key: 'demandaTotalRequerida',  width: 14 },
+      { header: 'A Producir',     key: 'cantidadAProducir',      width: 12 },
     ];
 
     ws.getRow(1).eachCell((cell) => {
@@ -169,7 +168,10 @@ async function exportarExcel(req, res) {
       pro_codigo_barra: l.pro_codigo_barra || '',
       pro_nombre_producto: l.pro_nombre_producto,
       det_stock_sala: l.det_stock_sala,
-      requerimiento: l.requerimiento,
+      ventaDiaria: l.ventaDiaria,
+      loteProduccionBase: l.loteProduccionBase,
+      stockSeguridadCalculado: l.stockSeguridadCalculado,
+      demandaTotalRequerida: l.demandaTotalRequerida,
       cantidadAProducir: l.cantidadAProducir,
     }));
 

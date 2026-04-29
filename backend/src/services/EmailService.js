@@ -15,14 +15,18 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
   const ws  = wb.addWorksheet('Reposición');
 
   ws.columns = [
-    { header: 'Folio',          key: 'folio',              width: 20 },
-    { header: 'Fecha',          key: 'fecha',              width: 22 },
-    { header: 'Departamento',   key: 'dep',                width: 16 },
-    { header: 'PLU',            key: 'plu',                width: 12 },
-    { header: 'Código Barra',   key: 'barra',              width: 16 },
-    { header: 'Producto',       key: 'nombre',             width: 40 },
-    { header: 'Stock Sala',     key: 'stock',              width: 12 },
-    { header: 'A Reponer',      key: 'reponer',            width: 12 },
+    { header: 'Folio',          key: 'folio',   width: 20 },
+    { header: 'Fecha',          key: 'fecha',   width: 22 },
+    { header: 'Departamento',   key: 'dep',     width: 16 },
+    { header: 'PLU',            key: 'plu',     width: 12 },
+    { header: 'Código Barra',   key: 'barra',   width: 16 },
+    { header: 'Producto',       key: 'nombre',  width: 40 },
+    { header: 'Stock Sala',     key: 'stock',   width: 12 },
+    { header: 'Venta Diaria',   key: 'vd',      width: 13 },
+    { header: 'Lote Base',      key: 'lote',    width: 13 },
+    { header: 'Stock Seg.',     key: 'seg',     width: 12 },
+    { header: 'Demanda Total',  key: 'dem',     width: 14 },
+    { header: 'A Producir',     key: 'reponer', width: 12 },
   ];
 
   // Estilo encabezado
@@ -43,6 +47,10 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
       barra:  q.pro_codigo_barra || '',
       nombre: q.pro_nombre_producto,
       stock:  q.det_stock_sala,
+      vd:     q.ventaDiaria,
+      lote:   q.loteProduccionBase,
+      seg:    q.stockSeguridadCalculado,
+      dem:    q.demandaTotalRequerida,
       reponer: q.cantidadAProducir,
     });
     // Alternar color de fila
