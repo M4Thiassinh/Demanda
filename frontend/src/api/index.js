@@ -10,7 +10,12 @@ const getBaseUrl = () => {
   return `${envUrl.replace(/\/$/, '')}/api`;
 };
 
-const api = axios.create({ baseURL: getBaseUrl() })
+const api = axios.create({ 
+  baseURL: getBaseUrl(),
+  headers: {
+    'ngrok-skip-browser-warning': 'true'
+  }
+})
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
