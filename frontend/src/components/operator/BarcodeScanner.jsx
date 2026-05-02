@@ -36,9 +36,14 @@ export default function BarcodeScanner({ onScan, onClose }) {
           aspectRatio: 1.7,
         },
         (texto) => {
+          if (scannerRef.current.isStopping) return;
+          scannerRef.current.isStopping = true;
           setEscaneado(texto.trim())
-          scanner.stop().catch(() => {})
-          onScan(texto.trim())
+          scanner.stop().then(() => {
+            onScan(texto.trim())
+          }).catch(() => {
+            onScan(texto.trim())
+          })
         },
         () => {} // errores de frame silenciosos
       )
@@ -50,7 +55,12 @@ export default function BarcodeScanner({ onScan, onClose }) {
         }
       })
 
-    return () => { scanner.stop().catch(() => {}) }
+    return () => { 
+      if (scanner && !scanner.isStopping) {
+        scanner.isStopping = true;
+        scanner.stop().catch(() => {}) 
+      }
+    }
   }, [])
 
   return (
