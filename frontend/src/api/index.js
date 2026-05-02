@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
