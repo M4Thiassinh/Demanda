@@ -1,13 +1,6 @@
 import axios from 'axios'
 
-// Capturamos la URL de Ngrok que configuraste en Vercel. 
-// Si por alguna razón no existe (ej. estás probando en local), usamos un string vacío.
-const NGROK_URL = import.meta.env.VITE_API_URL || '';
-
-// Le decimos a Axios que junte tu enlace de Ngrok con la ruta '/api'
-const api = axios.create({
-  baseURL: `${NGROK_URL}/api`
-})
+const api = axios.create({ baseURL: '/api' })
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
