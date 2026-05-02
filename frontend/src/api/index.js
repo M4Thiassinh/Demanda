@@ -1,6 +1,16 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
+// Asegurarnos de que la URL base siempre termine en /api
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) return '/api';
+  // Si la variable de entorno ya tiene /api, la usamos tal cual
+  if (envUrl.endsWith('/api')) return envUrl;
+  // Si no, le quitamos el slash final (si lo tiene) y le agregamos /api
+  return `${envUrl.replace(/\/$/, '')}/api`;
+};
+
+const api = axios.create({ baseURL: getBaseUrl() })
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
