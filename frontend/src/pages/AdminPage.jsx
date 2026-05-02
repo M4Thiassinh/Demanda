@@ -147,7 +147,10 @@ function ProductosTab() {
 
   const buscar = async () => {
     if (!depSel) return
-    try { setRes(await buscarProductos(depSel, q)) } catch {}
+    try { 
+      const res = await buscarProductos(depSel, q)
+      if (Array.isArray(res)) setRes(res)
+    } catch {}
   }
 
   const seleccionar = async (p) => {

@@ -36,12 +36,16 @@ export default function RevisionPage() {
     setQuery(codigo)
     try {
       const res = await buscarProductos(depId, codigo)
-      if (res.length === 1) {
-        seleccionar(res[0])
-      } else if (res.length > 1) {
-        setRes(res)
+      if (Array.isArray(res)) {
+        if (res.length === 1) {
+          seleccionar(res[0])
+        } else if (res.length > 1) {
+          setRes(res)
+        } else {
+          setError(`Código "${codigo}" no encontrado en este departamento`)
+        }
       } else {
-        setError(`Código "${codigo}" no encontrado en este departamento`)
+        setError('Error en el formato de respuesta del servidor (Posible bloqueo de Ngrok).')
       }
     } catch {}
   }
@@ -51,7 +55,12 @@ export default function RevisionPage() {
     clearTimeout(timerRef.current)
     if (q.length < 1) { setRes([]); return }
     timerRef.current = setTimeout(async () => {
-      try { setRes(await buscarProductos(depId, q)) } catch {}
+      try { 
+        const res = await buscarProductos(depId, q)
+        if (Array.isArray(res)) {
+          setRes(res)
+        }
+      } catch {}
     }, 250)
   }
 
