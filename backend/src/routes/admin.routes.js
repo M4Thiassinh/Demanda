@@ -15,6 +15,8 @@ const upload = multer({
 });
 
 router.get('/departamentos',              ctrl.listarDepartamentos);
+router.post('/departamentos',             ctrl.crearDepartamento);
+router.put('/departamentos/:depId',       ctrl.actualizarDepartamento);
 router.get('/usuarios',                   ctrl.listarUsuarios);
 router.get('/productos',                  ctrl.buscarProductos);
 router.get('/admin/config/:depId',        ctrl.obtenerConfig);

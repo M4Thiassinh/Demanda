@@ -14,8 +14,9 @@ USE `Demanda`;
 -- 1. DEPARTAMENTOS
 -- =============================================================
 CREATE TABLE IF NOT EXISTS departamentos (
-    dep_id     VARCHAR(10)  NOT NULL,
-    dep_nombre VARCHAR(100) NOT NULL,
+    dep_id         VARCHAR(10)  NOT NULL,
+    dep_nombre     VARCHAR(100) NOT NULL,
+    dep_email_jefe VARCHAR(255) NULL COMMENT 'Correo del jefe para envío de reportes',
     CONSTRAINT pk_departamentos PRIMARY KEY (dep_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -58,6 +59,8 @@ CREATE TABLE IF NOT EXISTS productos (
     dep_id                       VARCHAR(10)   NOT NULL,
     pro_dias_produccion_override INT           NULL COMMENT 'Override días producción/semana. NULL = usar config departamento',
     pro_dias_seguridad_override  INT           NULL COMMENT 'Override días stock seguridad. NULL = lógica automática',
+    pro_dias_elaboracion         VARCHAR(50)   NULL COMMENT 'Días específicos de elaboración, ej: 1,3,5 (1=Lunes)',
+    pro_cantidad_minima          INT           NULL DEFAULT 0 COMMENT 'Cantidad mínima a producir',
     CONSTRAINT pk_productos      PRIMARY KEY (pro_codigo_plu),
     CONSTRAINT fk_productos_dep  FOREIGN KEY (dep_id)
         REFERENCES departamentos(dep_id) ON DELETE RESTRICT

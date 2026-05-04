@@ -65,7 +65,7 @@ async function finalizarRevision(req, res) {
 
     const revRes = await db.query(
       `SELECT r.rev_id, r.rev_folio, r.dep_id, r.rev_fecha,
-              d.dep_nombre, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
+              d.dep_nombre, d.dep_email_jefe, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
          FROM revisiones r
          JOIN departamentos d  ON d.dep_id = r.dep_id
          LEFT JOIN usuarios u  ON u.usu_id = r.usu_id
@@ -81,7 +81,8 @@ async function finalizarRevision(req, res) {
       `SELECT dr.pro_codigo_plu, dr.det_stock_sala,
               p.pro_codigo_barra, p.pro_nombre_producto,
               p.vta_total_periodo, p.dias_historial,
-              p.pro_dias_produccion_override, p.pro_dias_seguridad_override
+              p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
+              p.pro_dias_elaboracion, p.pro_cantidad_minima
          FROM detalle_revision dr
          JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu
         WHERE dr.rev_id = ?`,
@@ -90,7 +91,7 @@ async function finalizarRevision(req, res) {
 
     const resultados = detRes.rows.map((item) => ({
       ...item,
-      ...calcularDemanda(config, item, item.det_stock_sala),
+      ...calcularDemanda(config, item, item.det_stock_sala, rev.rev_fecha),
     }));
 
     // Solo productos con quiebre (requerimiento < 0)
@@ -101,6 +102,7 @@ async function finalizarRevision(req, res) {
     if (quiebres.length > 0) {
       await enviarOrdenProduccion({
         depNombre: rev.dep_nombre,
+        depEmail:  rev.dep_email_jefe,
         revFecha:  rev.rev_fecha,
         folio:     rev.rev_folio,
         usuNombre: rev.usu_nombre,

@@ -18,6 +18,8 @@ const api = axios.create({
 })
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
+export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
+export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
 export const buscarProductos = (depId, q) => api.get('/productos', { params: { dep_id: depId, q } }).then(r => r.data)
 

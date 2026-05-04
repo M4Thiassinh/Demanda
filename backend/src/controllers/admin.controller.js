@@ -7,8 +7,38 @@ const { calcularDemanda } = require('../services/DemandCalculatorService');
 // GET /api/departamentos
 async function listarDepartamentos(req, res) {
   try {
-    const { rows } = await db.query('SELECT dep_id, dep_nombre FROM departamentos ORDER BY dep_nombre');
+    const { rows } = await db.query('SELECT dep_id, dep_nombre, dep_email_jefe FROM departamentos ORDER BY dep_nombre');
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// POST /api/departamentos
+async function crearDepartamento(req, res) {
+  try {
+    const { dep_id, dep_nombre, dep_email_jefe } = req.body;
+    if (!dep_id || !dep_nombre) return res.status(400).json({ error: 'Faltan datos obligatorios' });
+    await db.query(
+      `INSERT INTO departamentos (dep_id, dep_nombre, dep_email_jefe) VALUES (?, ?, ?)`,
+      [dep_id, dep_nombre, dep_email_jefe || null]
+    );
+    // Configuración por defecto para el nuevo departamento
+    await db.query(
+      `INSERT INTO configuraciones (dep_id, dias_produccion_semana, dias_seguridad_defecto) VALUES (?, 6, 2)`,
+      [dep_id]
+    );
+    res.status(201).json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// PUT /api/departamentos/:depId
+async function actualizarDepartamento(req, res) {
+  try {
+    const { dep_nombre, dep_email_jefe } = req.body;
+    await db.query(
+      `UPDATE departamentos SET dep_nombre = COALESCE(?, dep_nombre), dep_email_jefe = ? WHERE dep_id = ?`,
+      [dep_nombre, dep_email_jefe || null, req.params.depId]
+    );
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
@@ -52,7 +82,8 @@ async function buscarProductos(req, res) {
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial,
-              pro_dias_produccion_override, pro_dias_seguridad_override
+              pro_dias_produccion_override, pro_dias_seguridad_override,
+              pro_dias_elaboracion, pro_cantidad_minima
          FROM productos
         WHERE dep_id = ?
           AND (pro_nombre_producto LIKE ? OR pro_codigo_plu LIKE ? OR pro_codigo_barra LIKE ?)
@@ -69,7 +100,8 @@ async function obtenerProducto(req, res) {
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial, dep_id,
-              pro_dias_produccion_override, pro_dias_seguridad_override
+              pro_dias_produccion_override, pro_dias_seguridad_override,
+              pro_dias_elaboracion, pro_cantidad_minima
          FROM productos WHERE pro_codigo_plu = ?`,
       [req.params.plu]
     );
@@ -81,15 +113,17 @@ async function obtenerProducto(req, res) {
 // PUT /api/admin/productos/:plu
 async function actualizarProducto(req, res) {
   try {
-    const { pro_codigo_barra, pro_dias_produccion_override, pro_dias_seguridad_override } = req.body;
+    const { pro_codigo_barra, pro_dias_produccion_override, pro_dias_seguridad_override, pro_dias_elaboracion, pro_cantidad_minima } = req.body;
     const toNull = (v) => (v === '' || v === undefined || v === null) ? null : parseInt(v, 10);
     await db.query(
       `UPDATE productos
           SET pro_codigo_barra              = COALESCE(?, pro_codigo_barra),
               pro_dias_produccion_override  = ?,
-              pro_dias_seguridad_override   = ?
+              pro_dias_seguridad_override   = ?,
+              pro_dias_elaboracion          = ?,
+              pro_cantidad_minima           = ?
         WHERE pro_codigo_plu = ?`,
-      [pro_codigo_barra ?? null, toNull(pro_dias_produccion_override), toNull(pro_dias_seguridad_override), req.params.plu]
+      [pro_codigo_barra ?? null, toNull(pro_dias_produccion_override), toNull(pro_dias_seguridad_override), pro_dias_elaboracion || null, toNull(pro_cantidad_minima) || 0, req.params.plu]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -106,6 +140,7 @@ async function exportarExcel(req, res) {
               dr.det_stock_sala,
               p.vta_total_periodo, p.dias_historial,
               p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
+              p.pro_dias_elaboracion, p.pro_cantidad_minima,
               c.dias_produccion_semana
          FROM revisiones r
          JOIN departamentos d    ON d.dep_id = r.dep_id
@@ -128,7 +163,9 @@ async function exportarExcel(req, res) {
         { dias_produccion_semana: row.dias_produccion_semana },
         { vta_total_periodo: row.vta_total_periodo, dias_historial: row.dias_historial,
           pro_dias_produccion_override: row.pro_dias_produccion_override,
-          pro_dias_seguridad_override:  row.pro_dias_seguridad_override },
+          pro_dias_seguridad_override:  row.pro_dias_seguridad_override,
+          pro_dias_elaboracion:         row.pro_dias_elaboracion,
+          pro_cantidad_minima:          row.pro_cantidad_minima },
         row.det_stock_sala
       );
       return { ...row, ...calc };
@@ -183,7 +220,8 @@ async function exportarExcel(req, res) {
 }
 
 module.exports = {
-  listarDepartamentos, listarUsuarios,
+  listarDepartamentos, crearDepartamento, actualizarDepartamento,
+  listarUsuarios,
   obtenerConfig, actualizarConfig,
   subirCSV, buscarProductos,
   obtenerProducto, actualizarProducto,

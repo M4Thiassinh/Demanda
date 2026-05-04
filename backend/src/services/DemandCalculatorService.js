@@ -15,13 +15,15 @@
  *   requerimiento_a_producir = demanda_total_requerida - det_stock_sala
  *   → Si <= 0: no se produce. Si > 0: Math.ceil()
  */
-function calcularDemanda(config, producto, stockSala) {
+function calcularDemanda(config, producto, stockSala, revFecha) {
   const { dias_produccion_semana } = config;
   const {
     vta_total_periodo,
     dias_historial,
     pro_dias_produccion_override,
     pro_dias_seguridad_override,
+    pro_dias_elaboracion,
+    pro_cantidad_minima
   } = producto;
 
   // ── Paso A ────────────────────────────────────────────────
@@ -42,8 +44,28 @@ function calcularDemanda(config, producto, stockSala) {
   const demandaTotalRequerida   = loteProduccionBase + stockSeguridadCalculado;
   const requerimientoRaw        = demandaTotalRequerida - stockSala;
 
-  const hayQuiebre        = requerimientoRaw > 0;
-  const cantidadAProducir = hayQuiebre ? Math.ceil(requerimientoRaw) : 0;
+  let hayQuiebre        = requerimientoRaw > 0;
+  let cantidadAProducir = hayQuiebre ? Math.ceil(requerimientoRaw) : 0;
+
+  // ── Cantidad Mínima ───────────────────────────────────────
+  const min = parseInt(pro_cantidad_minima || 0, 10);
+  if (cantidadAProducir < min) {
+    cantidadAProducir = 0;
+    hayQuiebre = false;
+  }
+
+  // ── Días de Elaboración ───────────────────────────────────
+  if (hayQuiebre && pro_dias_elaboracion) {
+    const fechaBase = revFecha ? new Date(revFecha) : new Date();
+    const diaJS = fechaBase.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+    const diaFormato = diaJS === 0 ? 7 : diaJS; // Convertimos a 1=Lunes, ..., 7=Domingo
+    
+    const diasPermitidos = pro_dias_elaboracion.split(',').map(d => parseInt(d.trim(), 10));
+    if (!diasPermitidos.includes(diaFormato)) {
+      cantidadAProducir = 0;
+      hayQuiebre = false;
+    }
+  }
 
   return {
     ventaDiaria:              r4(ventaDiaria),

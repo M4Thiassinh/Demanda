@@ -1,42 +1,90 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
-import { getDepartamentos, getConfig, updateConfig, subirCSV, buscarProductos, getProducto, updateProducto, exportarExcel } from '../api'
+import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, buscarProductos, getProducto, updateProducto, exportarExcel } from '../api'
 
 // ── Tab Configuración ────────────────────────────────────────
 function ConfigTab() {
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '' })
+  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '', dep_email_jefe: '' })
   const [msg, setMsg]            = useState(null)
   const [loading, setLoading]    = useState(false)
+  const [showCrear, setShowCrear] = useState(false)
+  const [newDep, setNewDep]      = useState({ id: '', nombre: '', email: '' })
 
-  useEffect(() => { getDepartamentos().then(setDeps) }, [])
+  const loadDeps = () => getDepartamentos().then(setDeps)
+  useEffect(() => { loadDeps() }, [])
   useEffect(() => {
     if (!depSel) return
-    getConfig(depSel).then(c => setCfg({ dias_produccion_semana: c.dias_produccion_semana, dias_seguridad_defecto: c.dias_seguridad_defecto }))
-  }, [depSel])
+    const d = departamentos.find(x => x.dep_id === depSel)
+    getConfig(depSel).then(c => setCfg({ 
+      dias_produccion_semana: c.dias_produccion_semana, 
+      dias_seguridad_defecto: c.dias_seguridad_defecto,
+      dep_email_jefe: d?.dep_email_jefe || ''
+    }))
+  }, [depSel, departamentos])
 
   const guardar = async () => {
     setLoading(true); setMsg(null)
     try {
       await updateConfig(depSel, { dias_produccion_semana: parseInt(cfg.dias_produccion_semana), dias_seguridad_defecto: parseInt(cfg.dias_seguridad_defecto) })
+      await updateDepartamento(depSel, { dep_nombre: departamentos.find(x => x.dep_id === depSel)?.dep_nombre, dep_email_jefe: cfg.dep_email_jefe })
+      await loadDeps()
       setMsg({ ok: true, texto: 'Guardado correctamente' })
+    } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
+    finally { setLoading(false) }
+  }
+
+  const crearDep = async () => {
+    setLoading(true); setMsg(null)
+    try {
+      await crearDepartamento({ dep_id: newDep.id, dep_nombre: newDep.nombre, dep_email_jefe: newDep.email })
+      await loadDeps()
+      setNewDep({ id: '', nombre: '', email: '' })
+      setShowCrear(false)
+      setDepSel(newDep.id)
+      setMsg({ ok: true, texto: 'Departamento creado' })
     } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
     finally { setLoading(false) }
   }
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <label className="label mb-0">Seleccionar Departamento</label>
+        <button onClick={() => setShowCrear(!showCrear)} className="text-brand-400 text-sm font-semibold hover:text-brand-300">
+          {showCrear ? '✕ Cerrar' : '+ Nuevo Departamento'}
+        </button>
+      </div>
+
+      {showCrear && (
+        <div className="card p-4 space-y-3 border border-brand-500/30 bg-brand-900/10 animate-slide-down">
+          <p className="text-brand-400 font-bold text-sm">Crear Nuevo Departamento</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="label">ID (ej: 25)</label><input type="text" value={newDep.id} onChange={e => setNewDep(n => ({...n, id: e.target.value}))} className="input-field" /></div>
+            <div><label className="label">Nombre</label><input type="text" value={newDep.nombre} onChange={e => setNewDep(n => ({...n, nombre: e.target.value}))} className="input-field" /></div>
+          </div>
+          <div><label className="label">Correo Jefe (opcional)</label><input type="email" value={newDep.email} onChange={e => setNewDep(n => ({...n, email: e.target.value}))} className="input-field" placeholder="Para recibir reportes de quiebres" /></div>
+          <button onClick={crearDep} disabled={loading || !newDep.id || !newDep.nombre} className="btn-primary w-full disabled:opacity-50 text-sm py-2">
+            Confirmar Creación
+          </button>
+        </div>
+      )}
+
       <div>
-        <label className="label">Departamento</label>
         <select id="cfg-dep" value={depSel} onChange={e => setDepSel(e.target.value)} className="input-field">
           <option value="">— Seleccionar —</option>
           {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre} (ID:{d.dep_id})</option>)}
         </select>
       </div>
+      
       {depSel && (
         <div className="card p-5 space-y-4 animate-slide-up">
+          <div>
+            <label className="label">Correo del Jefe de Departamento</label>
+            <input type="email" value={cfg.dep_email_jefe} onChange={e => setCfg(c => ({ ...c, dep_email_jefe: e.target.value }))} className="input-field" placeholder="ejemplo@empresa.com" />
+          </div>
           <div>
             <label className="label">Días de Producción / Semana <span className="text-gray-500 font-normal text-xs">(default 6 = Lunes a Sábado)</span></label>
             <input id="cfg-dias-prod" type="number" min={1} max={7} value={cfg.dias_produccion_semana}
@@ -58,7 +106,7 @@ function ConfigTab() {
           </div>
           {msg && <p className={`text-sm text-center font-medium rounded-lg p-2 ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
           <button id="btn-guardar-cfg" onClick={guardar} disabled={loading} className="btn-primary w-full disabled:opacity-50">
-            {loading ? 'Guardando…' : 'Guardar Configuración'}
+            {loading ? 'Guardando…' : 'Guardar Cambios'}
           </button>
         </div>
       )}
@@ -140,7 +188,7 @@ function ProductosTab() {
   const [q, setQ]                = useState('')
   const [resultados, setRes]     = useState([])
   const [seleccionado, setSel]   = useState(null)
-  const [form, setForm]          = useState({ pro_codigo_barra: '', pro_dias_produccion_override: '', pro_dias_seguridad_override: '' })
+  const [form, setForm]          = useState({ pro_codigo_barra: '', pro_dias_produccion_override: '', pro_dias_seguridad_override: '', pro_dias_elaboracion: '', pro_cantidad_minima: '' })
   const [msg, setMsg]            = useState(null)
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
@@ -160,6 +208,8 @@ function ProductosTab() {
       pro_codigo_barra:            det.pro_codigo_barra            || '',
       pro_dias_produccion_override: det.pro_dias_produccion_override ?? '',
       pro_dias_seguridad_override:  det.pro_dias_seguridad_override  ?? '',
+      pro_dias_elaboracion:         det.pro_dias_elaboracion         || '',
+      pro_cantidad_minima:          det.pro_cantidad_minima          ?? '',
     })
     setMsg(null)
   }
@@ -230,6 +280,34 @@ function ProductosTab() {
             <input type="number" min={0} value={form.pro_dias_seguridad_override}
               onChange={e => setForm(f => ({ ...f, pro_dias_seguridad_override: e.target.value }))}
               className="input-field" placeholder="Vacío = auto" />
+          </div>
+          <div>
+            <label className="label">Días Específicos de Elaboración</label>
+            <div className="grid grid-cols-4 gap-2 mt-1">
+              {[ {d:1,l:'Lun'}, {d:2,l:'Mar'}, {d:3,l:'Mié'}, {d:4,l:'Jue'}, {d:5,l:'Vie'}, {d:6,l:'Sáb'}, {d:7,l:'Dom'} ].map(dia => {
+                const checked = form.pro_dias_elaboracion ? form.pro_dias_elaboracion.split(',').includes(String(dia.d)) : false;
+                return (
+                  <label key={dia.d} className="flex items-center gap-2 text-sm text-gray-300 bg-gray-900 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-800">
+                    <input type="checkbox" checked={checked} 
+                      onChange={(e) => {
+                        let arr = form.pro_dias_elaboracion ? form.pro_dias_elaboracion.split(',') : [];
+                        if (e.target.checked) arr.push(String(dia.d));
+                        else arr = arr.filter(x => x !== String(dia.d));
+                        setForm(f => ({ ...f, pro_dias_elaboracion: arr.sort().join(',') }));
+                      }} 
+                      className="rounded border-gray-600 bg-gray-800 text-brand-500 focus:ring-brand-500" />
+                    {dia.l}
+                  </label>
+                )
+              })}
+            </div>
+            <p className="text-gray-500 text-xs mt-1">Si marcas días, el producto solo se pedirá si HOY es uno de esos días. Si no hay marcas, se pedirá siempre.</p>
+          </div>
+          <div>
+            <label className="label">Cantidad Mínima de Producción</label>
+            <input type="number" min={0} value={form.pro_cantidad_minima}
+              onChange={e => setForm(f => ({ ...f, pro_cantidad_minima: e.target.value }))}
+              className="input-field" placeholder="0 = sin mínimo" />
           </div>
           {msg && <p className={`text-sm text-center font-medium p-2 rounded-lg ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
           <button onClick={guardar} className="btn-primary w-full">Guardar Producto</button>

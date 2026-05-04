@@ -75,7 +75,7 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
 /**
  * Envía correo HTML + adjunto Excel con los quiebres.
  */
-async function enviarOrdenProduccion({ depNombre, revFecha, folio, usuNombre, quiebres }) {
+async function enviarOrdenProduccion({ depNombre, depEmail, revFecha, folio, usuNombre, quiebres }) {
   const fecha = new Date(revFecha).toLocaleString('es-CL', {
     timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short',
   });
@@ -122,10 +122,11 @@ async function enviarOrdenProduccion({ depNombre, revFecha, folio, usuNombre, qu
   </table></td></tr></table></body></html>`;
 
   const excelBuffer = await generarExcel(quiebres, depNombre, folio, revFecha);
+  const destinatario = depEmail || process.env.EMAIL_PRODUCCION;
 
   await transporter.sendMail({
     from:    process.env.EMAIL_FROM,
-    to:      process.env.EMAIL_PRODUCCION,
+    to:      destinatario,
     subject: `[Reposición] ${folio} — ${depNombre} — ${quiebres.length} ítem(s)`,
     html,
     attachments: [{
