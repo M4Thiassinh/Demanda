@@ -97,13 +97,15 @@ async function buscarProductos(req, res) {
 // GET /api/admin/productos/:plu
 async function obtenerProducto(req, res) {
   try {
+    const { dep_id } = req.query;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial, dep_id,
               pro_dias_produccion_override, pro_dias_seguridad_override,
               pro_dias_elaboracion, pro_cantidad_minima
-         FROM productos WHERE pro_codigo_plu = ?`,
-      [req.params.plu]
+         FROM productos WHERE pro_codigo_plu = ? AND dep_id = ?`,
+      [req.params.plu, dep_id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' });
     res.json(rows[0]);
@@ -113,7 +115,8 @@ async function obtenerProducto(req, res) {
 // PUT /api/admin/productos/:plu
 async function actualizarProducto(req, res) {
   try {
-    const { pro_codigo_barra, pro_dias_produccion_override, pro_dias_seguridad_override, pro_dias_elaboracion, pro_cantidad_minima } = req.body;
+    const { dep_id, pro_codigo_barra, pro_dias_produccion_override, pro_dias_seguridad_override, pro_dias_elaboracion, pro_cantidad_minima } = req.body;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
     const toNull = (v) => (v === '' || v === undefined || v === null) ? null : parseInt(v, 10);
     await db.query(
       `UPDATE productos
@@ -122,8 +125,8 @@ async function actualizarProducto(req, res) {
               pro_dias_seguridad_override   = ?,
               pro_dias_elaboracion          = ?,
               pro_cantidad_minima           = ?
-        WHERE pro_codigo_plu = ?`,
-      [pro_codigo_barra ?? null, toNull(pro_dias_produccion_override), toNull(pro_dias_seguridad_override), pro_dias_elaboracion || null, toNull(pro_cantidad_minima) || 0, req.params.plu]
+        WHERE pro_codigo_plu = ? AND dep_id = ?`,
+      [pro_codigo_barra ?? null, toNull(pro_dias_produccion_override), toNull(pro_dias_seguridad_override), pro_dias_elaboracion || null, toNull(pro_cantidad_minima) || 0, req.params.plu, dep_id]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -146,7 +149,7 @@ async function exportarExcel(req, res) {
          JOIN departamentos d    ON d.dep_id = r.dep_id
          LEFT JOIN usuarios u    ON u.usu_id = r.usu_id
          JOIN detalle_revision dr ON dr.rev_id = r.rev_id
-         JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu
+         JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
          JOIN configuraciones c   ON c.dep_id = r.dep_id
         WHERE r.rev_estado = 'completada'
           AND (? IS NULL OR r.dep_id = ?)

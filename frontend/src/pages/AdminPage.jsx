@@ -202,7 +202,7 @@ function ProductosTab() {
   }
 
   const seleccionar = async (p) => {
-    const det = await getProducto(p.pro_codigo_plu)
+    const det = await getProducto(p.pro_codigo_plu, depSel)
     setSel(det)
     setForm({
       pro_codigo_barra:            det.pro_codigo_barra            || '',
@@ -216,7 +216,7 @@ function ProductosTab() {
 
   const guardar = async () => {
     try {
-      await updateProducto(seleccionado.pro_codigo_plu, { ...form })
+      await updateProducto(seleccionado.pro_codigo_plu, depSel, { ...form })
       setMsg({ ok: true, texto: 'Producto actualizado' })
     } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
   }

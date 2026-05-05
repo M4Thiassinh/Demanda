@@ -27,8 +27,8 @@ export const buscarProductos = (depId, q) => api.get('/productos', { params: { d
 export const getConfig = (depId) => api.get(`/admin/config/${depId}`).then(r => r.data)
 export const updateConfig = (depId, data) => api.put(`/admin/config/${depId}`, data).then(r => r.data)
 export const subirCSV = (fd) => api.post('/admin/csv-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
-export const getProducto = (plu) => api.get(`/admin/productos/${plu}`).then(r => r.data)
-export const updateProducto = (plu, data) => api.put(`/admin/productos/${plu}`, data).then(r => r.data)
+export const getProducto = (plu, depId) => api.get(`/admin/productos/${plu}`, { params: { dep_id: depId } }).then(r => r.data)
+export const updateProducto = (plu, depId, data) => api.put(`/admin/productos/${plu}`, { ...data, dep_id: depId }).then(r => r.data)
 export const exportarExcel = (params) => api.get('/admin/export', { params, responseType: 'blob' })
 
 // Revisión

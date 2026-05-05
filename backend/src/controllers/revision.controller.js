@@ -84,7 +84,8 @@ async function finalizarRevision(req, res) {
               p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
               p.pro_dias_elaboracion, p.pro_cantidad_minima
          FROM detalle_revision dr
-         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu
+         JOIN revisiones r ON r.rev_id = dr.rev_id
+         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
         WHERE dr.rev_id = ?`,
       [revId]
     );
@@ -121,7 +122,8 @@ async function obtenerRevision(req, res) {
       `SELECT dr.det_id, dr.pro_codigo_plu, p.pro_nombre_producto,
               p.pro_codigo_barra, dr.det_stock_sala
          FROM detalle_revision dr
-         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu
+         JOIN revisiones r ON r.rev_id = dr.rev_id
+         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
         WHERE dr.rev_id = ? ORDER BY dr.det_id`,
       [req.params.revId]
     );

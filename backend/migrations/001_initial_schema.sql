@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS productos (
     pro_dias_seguridad_override  INT           NULL COMMENT 'Override días stock seguridad. NULL = lógica automática',
     pro_dias_elaboracion         VARCHAR(50)   NULL COMMENT 'Días específicos de elaboración, ej: 1,3,5 (1=Lunes)',
     pro_cantidad_minima          INT           NULL DEFAULT 0 COMMENT 'Cantidad mínima a producir',
-    CONSTRAINT pk_productos      PRIMARY KEY (pro_codigo_plu),
+    CONSTRAINT pk_productos      PRIMARY KEY (pro_codigo_plu, dep_id),
     CONSTRAINT fk_productos_dep  FOREIGN KEY (dep_id)
         REFERENCES departamentos(dep_id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -102,8 +102,6 @@ CREATE TABLE IF NOT EXISTS detalle_revision (
     CONSTRAINT pk_detalle         PRIMARY KEY (det_id),
     CONSTRAINT fk_detalle_rev     FOREIGN KEY (rev_id)
         REFERENCES revisiones(rev_id) ON DELETE CASCADE,
-    CONSTRAINT fk_detalle_pro     FOREIGN KEY (pro_codigo_plu)
-        REFERENCES productos(pro_codigo_plu) ON DELETE RESTRICT,
     CONSTRAINT uq_detalle_rev_pro UNIQUE (rev_id, pro_codigo_plu)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

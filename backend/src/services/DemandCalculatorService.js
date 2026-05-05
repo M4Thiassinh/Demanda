@@ -49,9 +49,15 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
 
   // ── Cantidad Mínima ───────────────────────────────────────
   const min = parseInt(pro_cantidad_minima || 0, 10);
-  if (cantidadAProducir < min) {
-    cantidadAProducir = 0;
-    hayQuiebre = false;
+  if (min > 0) {
+    if (cantidadAProducir < (min * 0.50)) {
+      cantidadAProducir = 0;
+      hayQuiebre = false;
+    } else if (cantidadAProducir >= (min * 0.50) && cantidadAProducir < min) {
+      cantidadAProducir = min;
+      hayQuiebre = true;
+    }
+    // Si cantidadAProducir >= min, se mantiene la cantidad original
   }
 
   // ── Días de Elaboración ───────────────────────────────────
