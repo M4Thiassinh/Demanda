@@ -17,6 +17,16 @@ const api = axios.create({
   }
 })
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('adminToken');
+  if (token) {
+    config.headers['x-admin-password'] = token;
+  }
+  return config;
+});
+
+export const loginAdmin = (password) => api.post('/admin/login', { password }).then(r => r.data)
+
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
 export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)

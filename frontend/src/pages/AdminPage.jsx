@@ -366,6 +366,60 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const reset    = useAppStore(s => s.reset)
   const [tab, setTab] = useState('config')
+  
+  // Lógica de Autenticación
+  const [auth, setAuth] = useState(localStorage.getItem('adminToken') !== null)
+  const [pass, setPass] = useState('')
+  const [authErr, setAuthErr] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    setLoading(true); setAuthErr('')
+    try {
+      const { loginAdmin } = await import('../api')
+      const res = await loginAdmin(pass)
+      if (res.ok) {
+        localStorage.setItem('adminToken', res.token)
+        setAuth(true)
+      }
+    } catch (e) {
+      setAuthErr('Contraseña incorrecta')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('adminToken')
+    setAuth(false)
+    setPass('')
+  }
+
+  if (!auth) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-4">
+        <div className="bg-gray-900 border border-gray-800 p-8 rounded-2xl w-full max-w-sm animate-fade-in shadow-2xl">
+          <div className="text-center mb-6">
+            <span className="text-5xl mb-3 block">🔒</span>
+            <h1 className="text-white font-bold text-2xl">Panel Administrador</h1>
+            <p className="text-gray-500 text-sm mt-1">Acceso Restringido</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input type="password" value={pass} onChange={e => setPass(e.target.value)}
+              placeholder="Contraseña..." autoFocus className="input-field text-center py-3 text-lg tracking-widest" />
+            {authErr && <p className="text-rose-400 text-sm text-center font-medium animate-fade-in">{authErr}</p>}
+            <button type="submit" disabled={loading || !pass} className="btn-primary w-full py-3 disabled:opacity-50">
+              {loading ? 'Verificando...' : 'Entrar'}
+            </button>
+            <button type="button" onClick={() => navigate('/')} className="w-full text-gray-500 hover:text-white text-sm mt-2 transition-colors">
+              ← Volver al inicio
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
 
   const tabs = [
     { key: 'config',    label: '⚙️ Config' },
@@ -380,7 +434,9 @@ export default function AdminPage() {
         <button onClick={() => { reset(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
         <div><p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
           <h1 className="text-white font-bold">Panel Administrador</h1></div>
-        <div className="ml-auto bg-gray-700/50 rounded-full px-3 py-1 text-gray-300 text-xs font-semibold">⚙️ Admin</div>
+        <button onClick={handleLogout} className="ml-auto bg-rose-900/40 hover:bg-rose-800/60 border border-rose-800/50 rounded-full px-4 py-1.5 text-rose-300 text-xs font-semibold transition-colors">
+          Cerrar Sesión
+        </button>
       </header>
 
       <div className="flex border-b border-gray-800 overflow-x-auto px-2">
