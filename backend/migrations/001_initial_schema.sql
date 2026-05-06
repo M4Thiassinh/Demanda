@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS departamentos (
     dep_id         VARCHAR(10)  NOT NULL,
     dep_nombre     VARCHAR(100) NOT NULL,
     dep_email_jefe VARCHAR(255) NULL COMMENT 'Correo del jefe para envío de reportes',
+    dep_emails_cc  VARCHAR(255) NULL COMMENT 'Correos CC separados por coma',
     CONSTRAINT pk_departamentos PRIMARY KEY (dep_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

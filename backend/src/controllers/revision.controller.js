@@ -17,9 +17,9 @@ async function buscarRevisionActiva(req, res) {
     const { rows } = await db.query(
       `SELECT rev_id, rev_folio, rev_fecha
          FROM revisiones
-        WHERE dep_id = ? AND usu_id = ? AND rev_estado = 'en_proceso'
+        WHERE dep_id = ? AND rev_estado = 'en_proceso'
         ORDER BY rev_fecha DESC LIMIT 1`,
-      [dep_id, usu_id]
+      [dep_id]
     );
     res.json(rows[0] || null);
   } catch (err) { res.status(500).json({ error: err.message }); }
