@@ -49,16 +49,6 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
 
   // ── Cantidad Mínima ───────────────────────────────────────
   const min = parseInt(pro_cantidad_minima || 0, 10);
-  if (min > 0) {
-    if (cantidadAProducir < (min * 0.50)) {
-      cantidadAProducir = 0;
-      hayQuiebre = false;
-    } else if (cantidadAProducir >= (min * 0.50) && cantidadAProducir < min) {
-      cantidadAProducir = min;
-      hayQuiebre = true;
-    }
-    // Si cantidadAProducir >= min, se mantiene la cantidad original
-  }
 
   // ── Días de Elaboración ───────────────────────────────────
   if (hayQuiebre && pro_dias_elaboracion) {
@@ -83,6 +73,7 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
     requerimiento:            r4(requerimientoRaw),
     hayQuiebre,
     cantidadAProducir,
+    pedidoMinimo:             min,
   };
 }
 

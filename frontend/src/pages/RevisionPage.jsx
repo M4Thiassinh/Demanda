@@ -153,6 +153,9 @@ export default function RevisionPage() {
             <div className="bg-brand-900/30 border border-brand-700/40 rounded-xl px-4 py-3 animate-fade-in">
               <p className="text-brand-300 font-semibold text-sm">{productoSel.pro_nombre_producto}</p>
               <p className="text-brand-500 text-xs font-mono">PLU {productoSel.pro_codigo_plu}</p>
+              {items.some(i => i.pro_codigo_plu === productoSel.pro_codigo_plu) && (
+                <p className="text-orange-400 text-xs mt-1 font-medium">⚠️ Ya escaneado anteriormente</p>
+              )}
             </div>
           )}
 
@@ -179,7 +182,7 @@ export default function RevisionPage() {
               <p className="text-white font-semibold text-sm">{items.length} producto(s) en revisión</p>
             </div>
             <div className="divide-y divide-gray-700/40">
-              {items.map(item => (
+              {[...items].reverse().map(item => (
                 <div key={item.pro_codigo_plu} className="flex items-center px-4 py-3 gap-3 hover:bg-gray-700/20">
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{item.pro_nombre_producto}</p>

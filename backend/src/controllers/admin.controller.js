@@ -7,7 +7,7 @@ const { calcularDemanda } = require('../services/DemandCalculatorService');
 // GET /api/departamentos
 async function listarDepartamentos(req, res) {
   try {
-    const { rows } = await db.query('SELECT dep_id, dep_nombre, dep_email_jefe FROM departamentos ORDER BY dep_nombre');
+    const { rows } = await db.query('SELECT dep_id, dep_nombre, dep_email_jefe, dep_emails_cc FROM departamentos ORDER BY dep_nombre');
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -15,11 +15,11 @@ async function listarDepartamentos(req, res) {
 // POST /api/departamentos
 async function crearDepartamento(req, res) {
   try {
-    const { dep_id, dep_nombre, dep_email_jefe } = req.body;
+    const { dep_id, dep_nombre, dep_email_jefe, dep_emails_cc } = req.body;
     if (!dep_id || !dep_nombre) return res.status(400).json({ error: 'Faltan datos obligatorios' });
     await db.query(
-      `INSERT INTO departamentos (dep_id, dep_nombre, dep_email_jefe) VALUES (?, ?, ?)`,
-      [dep_id, dep_nombre, dep_email_jefe || null]
+      `INSERT INTO departamentos (dep_id, dep_nombre, dep_email_jefe, dep_emails_cc) VALUES (?, ?, ?, ?)`,
+      [dep_id, dep_nombre, dep_email_jefe || null, dep_emails_cc || null]
     );
     // Configuración por defecto para el nuevo departamento
     await db.query(
@@ -33,10 +33,10 @@ async function crearDepartamento(req, res) {
 // PUT /api/departamentos/:depId
 async function actualizarDepartamento(req, res) {
   try {
-    const { dep_nombre, dep_email_jefe } = req.body;
+    const { dep_nombre, dep_email_jefe, dep_emails_cc } = req.body;
     await db.query(
-      `UPDATE departamentos SET dep_nombre = COALESCE(?, dep_nombre), dep_email_jefe = ? WHERE dep_id = ?`,
-      [dep_nombre, dep_email_jefe || null, req.params.depId]
+      `UPDATE departamentos SET dep_nombre = COALESCE(?, dep_nombre), dep_email_jefe = ?, dep_emails_cc = ? WHERE dep_id = ?`,
+      [dep_nombre, dep_email_jefe || null, dep_emails_cc || null, req.params.depId]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }

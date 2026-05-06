@@ -65,7 +65,7 @@ async function finalizarRevision(req, res) {
 
     const revRes = await db.query(
       `SELECT r.rev_id, r.rev_folio, r.dep_id, r.rev_fecha,
-              d.dep_nombre, d.dep_email_jefe, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
+              d.dep_nombre, d.dep_email_jefe, d.dep_emails_cc, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
          FROM revisiones r
          JOIN departamentos d  ON d.dep_id = r.dep_id
          LEFT JOIN usuarios u  ON u.usu_id = r.usu_id
@@ -78,20 +78,22 @@ async function finalizarRevision(req, res) {
     const config = await ConfigService.getConfig(rev.dep_id);
 
     const detRes = await db.query(
-      `SELECT dr.pro_codigo_plu, dr.det_stock_sala,
+      `SELECT p.pro_codigo_plu, 
+              COALESCE(dr.det_stock_sala, 0) AS det_stock_sala,
               p.pro_codigo_barra, p.pro_nombre_producto,
               p.vta_total_periodo, p.dias_historial,
               p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
-              p.pro_dias_elaboracion, p.pro_cantidad_minima
-         FROM detalle_revision dr
-         JOIN revisiones r ON r.rev_id = dr.rev_id
-         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
-        WHERE dr.rev_id = ?`,
-      [revId]
+              p.pro_dias_elaboracion, p.pro_cantidad_minima,
+              dr.det_id
+         FROM productos p
+         LEFT JOIN detalle_revision dr ON p.pro_codigo_plu = dr.pro_codigo_plu AND dr.rev_id = ?
+        WHERE p.dep_id = ?`,
+      [revId, rev.dep_id]
     );
 
     const resultados = detRes.rows.map((item) => ({
       ...item,
+      fue_escaneado: item.det_id !== null,
       ...calcularDemanda(config, item, item.det_stock_sala, rev.rev_fecha),
     }));
 
@@ -104,6 +106,7 @@ async function finalizarRevision(req, res) {
       await enviarOrdenProduccion({
         depNombre: rev.dep_nombre,
         depEmail:  rev.dep_email_jefe,
+        depEmailsCc: rev.dep_emails_cc,
         revFecha:  rev.rev_fecha,
         folio:     rev.rev_folio,
         usuNombre: rev.usu_nombre,

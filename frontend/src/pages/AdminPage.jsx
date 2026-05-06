@@ -7,11 +7,11 @@ import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, upd
 function ConfigTab() {
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '', dep_email_jefe: '' })
+  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '', dep_email_jefe: '', dep_emails_cc: '' })
   const [msg, setMsg]            = useState(null)
   const [loading, setLoading]    = useState(false)
   const [showCrear, setShowCrear] = useState(false)
-  const [newDep, setNewDep]      = useState({ id: '', nombre: '', email: '' })
+  const [newDep, setNewDep]      = useState({ id: '', nombre: '', email: '', cc: '' })
 
   const loadDeps = () => getDepartamentos().then(setDeps)
   useEffect(() => { loadDeps() }, [])
@@ -21,7 +21,8 @@ function ConfigTab() {
     getConfig(depSel).then(c => setCfg({ 
       dias_produccion_semana: c.dias_produccion_semana, 
       dias_seguridad_defecto: c.dias_seguridad_defecto,
-      dep_email_jefe: d?.dep_email_jefe || ''
+      dep_email_jefe: d?.dep_email_jefe || '',
+      dep_emails_cc: d?.dep_emails_cc || ''
     }))
   }, [depSel, departamentos])
 
@@ -29,7 +30,7 @@ function ConfigTab() {
     setLoading(true); setMsg(null)
     try {
       await updateConfig(depSel, { dias_produccion_semana: parseInt(cfg.dias_produccion_semana), dias_seguridad_defecto: parseInt(cfg.dias_seguridad_defecto) })
-      await updateDepartamento(depSel, { dep_nombre: departamentos.find(x => x.dep_id === depSel)?.dep_nombre, dep_email_jefe: cfg.dep_email_jefe })
+      await updateDepartamento(depSel, { dep_nombre: departamentos.find(x => x.dep_id === depSel)?.dep_nombre, dep_email_jefe: cfg.dep_email_jefe, dep_emails_cc: cfg.dep_emails_cc })
       await loadDeps()
       setMsg({ ok: true, texto: 'Guardado correctamente' })
     } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
@@ -39,9 +40,9 @@ function ConfigTab() {
   const crearDep = async () => {
     setLoading(true); setMsg(null)
     try {
-      await crearDepartamento({ dep_id: newDep.id, dep_nombre: newDep.nombre, dep_email_jefe: newDep.email })
+      await crearDepartamento({ dep_id: newDep.id, dep_nombre: newDep.nombre, dep_email_jefe: newDep.email, dep_emails_cc: newDep.cc })
       await loadDeps()
-      setNewDep({ id: '', nombre: '', email: '' })
+      setNewDep({ id: '', nombre: '', email: '', cc: '' })
       setShowCrear(false)
       setDepSel(newDep.id)
       setMsg({ ok: true, texto: 'Departamento creado' })
@@ -66,6 +67,7 @@ function ConfigTab() {
             <div><label className="label">Nombre</label><input type="text" value={newDep.nombre} onChange={e => setNewDep(n => ({...n, nombre: e.target.value}))} className="input-field" /></div>
           </div>
           <div><label className="label">Correo Jefe (opcional)</label><input type="email" value={newDep.email} onChange={e => setNewDep(n => ({...n, email: e.target.value}))} className="input-field" placeholder="Para recibir reportes de quiebres" /></div>
+          <div><label className="label">Correos CC (opcional)</label><input type="text" value={newDep.cc} onChange={e => setNewDep(n => ({...n, cc: e.target.value}))} className="input-field" placeholder="Separados por coma" /></div>
           <button onClick={crearDep} disabled={loading || !newDep.id || !newDep.nombre} className="btn-primary w-full disabled:opacity-50 text-sm py-2">
             Confirmar Creación
           </button>
@@ -84,6 +86,10 @@ function ConfigTab() {
           <div>
             <label className="label">Correo del Jefe de Departamento</label>
             <input type="email" value={cfg.dep_email_jefe} onChange={e => setCfg(c => ({ ...c, dep_email_jefe: e.target.value }))} className="input-field" placeholder="ejemplo@empresa.com" />
+          </div>
+          <div>
+            <label className="label">Correos CC <span className="text-gray-500 font-normal text-xs">(separados por coma)</span></label>
+            <input type="text" value={cfg.dep_emails_cc} onChange={e => setCfg(c => ({ ...c, dep_emails_cc: e.target.value }))} className="input-field" placeholder="uno@empresa.com, dos@empresa.com" />
           </div>
           <div>
             <label className="label">Días de Producción / Semana <span className="text-gray-500 font-normal text-xs">(default 6 = Lunes a Sábado)</span></label>

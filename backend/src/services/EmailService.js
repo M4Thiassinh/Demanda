@@ -27,6 +27,7 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
     { header: 'Stock Seg.',     key: 'seg',     width: 12 },
     { header: 'Demanda Total',  key: 'dem',     width: 14 },
     { header: 'A Producir',     key: 'reponer', width: 12 },
+    { header: 'Pedido Mínimo',  key: 'minimo',  width: 15 },
   ];
 
   // Estilo encabezado
@@ -46,12 +47,13 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
       plu:    q.pro_codigo_plu,
       barra:  q.pro_codigo_barra || '',
       nombre: q.pro_nombre_producto,
-      stock:  q.det_stock_sala,
+      stock:  q.fue_escaneado === false ? '0 (No esc.)' : q.det_stock_sala,
       vd:     q.ventaDiaria,
       lote:   q.loteProduccionBase,
       seg:    q.stockSeguridadCalculado,
       dem:    q.demandaTotalRequerida,
       reponer: q.cantidadAProducir,
+      minimo:  q.pedidoMinimo || 0,
     });
     // Alternar color de fila
     if (i % 2 === 0) {
@@ -75,17 +77,18 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
 /**
  * Envía correo HTML + adjunto Excel con los quiebres.
  */
-async function enviarOrdenProduccion({ depNombre, depEmail, revFecha, folio, usuNombre, quiebres }) {
+async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFecha, folio, usuNombre, quiebres }) {
   const fecha = new Date(revFecha).toLocaleString('es-CL', {
-    timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short',
+    timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short', hour12: false
   });
 
   const filas = quiebres.map((q) => `
     <tr>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.det_stock_sala}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.fue_escaneado === false ? '<span style="color:#9ca3af;font-style:italic">0 (No esc.)</span>' : q.det_stock_sala}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#ea580c;font-size:17px;">${q.cantidadAProducir}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:bold;color:#475569;">${q.pedidoMinimo > 0 ? q.pedidoMinimo : '-'}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
@@ -102,7 +105,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, revFecha, folio, usu
         <b>Usuario:</b> ${usuNombre || 'Operador'} &nbsp;|&nbsp; <b>Fecha:</b> ${fecha}
       </p>
       <p style="margin:8px 0 0;font-size:13px;color:#9a3412;">
-        <b>${quiebres.length}</b> producto(s) requieren reposición inmediata.
+        <b>${quiebres.length}</b> producto(s) requiere observacion
       </p>
     </td></tr>
     <tr><td style="padding:20px 28px;">
@@ -112,6 +115,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, revFecha, folio, usu
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Stock Sala</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">A Reponer</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Pedido Mín.</th>
         </tr></thead>
         <tbody>${filas}</tbody>
       </table>
@@ -127,6 +131,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, revFecha, folio, usu
   await transporter.sendMail({
     from:    process.env.EMAIL_FROM,
     to:      destinatario,
+    cc:      depEmailsCc || undefined,
     subject: `[Reposición] ${folio} — ${depNombre} — ${quiebres.length} ítem(s)`,
     html,
     attachments: [{
