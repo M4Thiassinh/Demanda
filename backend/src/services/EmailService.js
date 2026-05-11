@@ -26,7 +26,8 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
     { header: 'Lote Base',      key: 'lote',    width: 13 },
     { header: 'Stock Seg.',     key: 'seg',     width: 12 },
     { header: 'Demanda Total',  key: 'dem',     width: 14 },
-    { header: 'A Producir',     key: 'reponer', width: 12 },
+    { header: 'Sug. Sist.',     key: 'reponer', width: 12 },
+    { header: 'Cant. Pedida',   key: 'pedida',  width: 15 },
     { header: 'Pedido Mínimo',  key: 'minimo',  width: 15 },
   ];
 
@@ -52,7 +53,8 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
       lote:   q.loteProduccionBase,
       seg:    q.stockSeguridadCalculado,
       dem:    q.demandaTotalRequerida,
-      reponer: q.cantidadAProducir,
+      reponer: q.sugerenciaSistema,
+      pedida:  q.cantidadAProducir,
       minimo:  q.pedidoMinimo || 0,
     });
     // Alternar color de fila
@@ -63,8 +65,8 @@ async function generarExcel(quiebres, depNombre, folio, fecha) {
     }
   });
 
-  // Resaltar columna "A Reponer"
-  ws.getColumn('reponer').eachCell({ includeEmpty: false }, (cell, rowNum) => {
+  // Resaltar columna "Cant. Pedida"
+  ws.getColumn('pedida').eachCell({ includeEmpty: false }, (cell, rowNum) => {
     if (rowNum > 1) {
       cell.font = { bold: true, color: { argb: 'FFEA580C' } };
       cell.alignment = { horizontal: 'center' };
@@ -86,9 +88,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
     <tr>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.fue_escaneado === false ? '<span style="color:#9ca3af;font-style:italic">0 (No esc.)</span>' : q.det_stock_sala}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#ea580c;font-size:17px;">${q.cantidadAProducir}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:bold;color:#475569;">${q.pedidoMinimo > 0 ? q.pedidoMinimo : '-'}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
@@ -113,9 +113,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
         <thead><tr style="background:#1e293b;color:#fff;">
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
-          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Stock Sala</th>
-          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">A Reponer</th>
-          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Pedido Mín.</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Cant. Pedir</th>
         </tr></thead>
         <tbody>${filas}</tbody>
       </table>

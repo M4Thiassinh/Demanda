@@ -44,7 +44,10 @@ export const exportarExcel = (params) => api.get('/admin/export', { params, resp
 // Revisión
 export const buscarRevisionActiva = (depId, usuId) => api.get('/revision/activa', { params: { dep_id: depId, usu_id: usuId } }).then(r => r.data)
 export const iniciarRevision = (depId, usuId) => api.post('/revision', { dep_id: depId, usu_id: usuId }).then(r => r.data)
-export const agregarDetalle = (revId, plu, stock) => api.post(`/revision/${revId}/detalle`, { pro_codigo_plu: plu, det_stock_sala: stock }).then(r => r.data)
+export const calcularItem = (revId, plu, stock) => api.post(`/revision/${revId}/calcular-item`, { pro_codigo_plu: plu, det_stock_sala: stock }).then(r => r.data)
+export const agregarDetalle = (revId, plu, stock, cantidad_pedir) => api.post(`/revision/${revId}/detalle`, { pro_codigo_plu: plu, det_stock_sala: stock, cantidad_pedir }).then(r => r.data)
+export const agregarDetalleBulk = (revId, items) => api.post(`/revision/${revId}/detalle/bulk`, { items }).then(r => r.data)
+export const obtenerNoEscaneados = (revId) => api.get(`/revision/${revId}/no-escaneados`).then(r => r.data)
 export const obtenerRevision = (revId) => api.get(`/revision/${revId}`).then(r => r.data)
 export const eliminarDetalle = (revId, plu) => api.delete(`/revision/${revId}/detalle/${plu}`).then(r => r.data)
 export const finalizarRevision = (revId) => api.post(`/revision/${revId}/finalizar`).then(r => r.data)

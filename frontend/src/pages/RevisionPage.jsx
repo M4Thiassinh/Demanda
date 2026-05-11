@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
 import { buscarProductos, agregarDetalle, eliminarDetalle, finalizarRevision, obtenerRevision } from '../api'
 import BarcodeScanner from '../components/operator/BarcodeScanner'
-
+import CalculoModal from '../components/operator/CalculoModal'
+import NoEscaneadosModal from '../components/operator/NoEscaneadosModal'
+import { calcularItem, agregarDetalleBulk } from '../api'
+import Swal from 'sweetalert2'
 export default function RevisionPage() {
   const navigate = useNavigate()
   const { depId, depNombre, usuNombre, revisionId, revFolio, items, addItem, removeItem, clearRevision, reset } = useAppStore()
@@ -17,6 +20,8 @@ export default function RevisionPage() {
   const [modalResult, setModal]     = useState(null)
   const [escaner, setEscaner]       = useState(false)
   const [error, setError]           = useState('')
+  const [calcModal, setCalcModal]   = useState(null)
+  const [showNoEscaneados, setShowNoEscaneados] = useState(false)
   const timerRef = useRef(null)
   const stockRef = useRef(null)
 
@@ -75,11 +80,35 @@ export default function RevisionPage() {
     if (stock === '' || isNaN(parseInt(stock))) return setError('Ingresa el stock')
     setGuardando(true); setError('')
     try {
-      await agregarDetalle(revisionId, productoSel.pro_codigo_plu, parseInt(stock))
-      addItem({ ...productoSel, det_stock_sala: parseInt(stock) })
-      setProducto(null); setStock(''); setQuery('')
-    } catch (e) { setError(e?.response?.data?.error || 'Error') }
+      const calcInfo = await calcularItem(revisionId, productoSel.pro_codigo_plu, parseInt(stock))
+      setCalcModal({ ...productoSel, ...calcInfo, stockIngresado: parseInt(stock) })
+    } catch (e) { setError(e?.response?.data?.error || 'Error al calcular') }
     finally { setGuardando(false) }
+  }
+
+  const handleConfirmarPedido = async (cantidadPedir, isBulk = false, prodBulk = null) => {
+    try {
+      if (isBulk) {
+        // Individual desde modal de no escaneados
+        await agregarDetalle(revisionId, prodBulk.pro_codigo_plu, 0, cantidadPedir)
+        addItem({ ...prodBulk, det_stock_sala: 0, det_cantidad_pedir: cantidadPedir })
+      } else {
+        // Normal desde escaner
+        await agregarDetalle(revisionId, calcModal.pro_codigo_plu, calcModal.stockIngresado, cantidadPedir)
+        addItem({ ...calcModal, det_stock_sala: calcModal.stockIngresado, det_cantidad_pedir: cantidadPedir })
+      }
+      setCalcModal(null); setProducto(null); setStock(''); setQuery('');
+      if (isBulk) Swal.fire({title: 'Añadido', timer: 1000, showConfirmButton: false, icon: 'success'});
+    } catch (e) { setError(e?.response?.data?.error || 'Error al guardar') }
+  }
+
+  const handleBulkAdd = async (itemsToAdd) => {
+    try {
+      await agregarDetalleBulk(revisionId, itemsToAdd)
+      itemsToAdd.forEach(i => addItem({ pro_codigo_plu: i.pro_codigo_plu, det_stock_sala: 0, det_cantidad_pedir: i.cantidad_pedir, pro_nombre_producto: 'Producto (No escaneado)' }))
+      setShowNoEscaneados(false)
+      Swal.fire({title: 'Lote añadido', timer: 1500, showConfirmButton: false, icon: 'success'});
+    } catch (e) { setError(e?.response?.data?.error || 'Error al guardar lote') }
   }
 
   const quitar = async (plu) => {
@@ -115,11 +144,15 @@ export default function RevisionPage() {
         <div className="card p-4 space-y-3">
           <div className="relative">
             <label className="label">PLU, código de barras o nombre</label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               <input id="input-buscar" type="text" value={query} onChange={e => buscar(e.target.value)}
                 onFocus={() => resultados.length && setRes(resultados)}
-                placeholder="Escanea o escribe…" className="input-field py-4 text-base flex-1"
+                placeholder="Escanea o escribe…" className="input-field py-4 text-base flex-1 pr-10"
                 autoComplete="off" />
+              {query && (
+                <button onClick={() => { setQuery(''); setProducto(null); setRes([]) }}
+                  className="absolute right-20 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xl p-2 z-10">✕</button>
+              )}
               <button
                 id="btn-camara"
                 onClick={() => setEscaner(true)}
@@ -127,10 +160,6 @@ export default function RevisionPage() {
                 className="flex-shrink-0 w-14 bg-gray-700 hover:bg-brand-600 border border-gray-600 hover:border-brand-500 rounded-xl flex items-center justify-center text-2xl transition-all active:scale-95"
               >📷</button>
             </div>
-            {query && (
-              <button onClick={() => { setQuery(''); setProducto(null); setRes([]) }}
-                className="absolute right-3 top-9 text-gray-500 hover:text-white text-lg">✕</button>
-            )}
             {resultados.length > 0 && (
               <ul className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
                 {resultados.map(p => (
@@ -175,10 +204,17 @@ export default function RevisionPage() {
           </button>
         </div>
 
+        {/* Botón Ver No Escaneados */}
+        <div className="flex justify-center mt-2 mb-2">
+          <button onClick={() => setShowNoEscaneados(true)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-brand-400 font-semibold rounded-xl text-sm transition-colors border border-gray-700">
+            🔍 Ver Productos No Escaneados
+          </button>
+        </div>
+
         {/* Lista de ítems */}
         {items.length > 0 && (
           <div className="card overflow-hidden animate-slide-up">
-            <div className="px-4 py-3 border-b border-gray-700/50">
+            <div className="px-4 py-3 border-b border-gray-700/50 flex justify-between items-center">
               <p className="text-white font-semibold text-sm">{items.length} producto(s) en revisión</p>
             </div>
             <div className="divide-y divide-gray-700/40">
@@ -189,8 +225,12 @@ export default function RevisionPage() {
                     <p className="text-gray-500 text-xs font-mono">PLU {item.pro_codigo_plu}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-white font-bold text-xl">{item.det_stock_sala}</p>
-                    <p className="text-gray-500 text-xs">en sala</p>
+                    <p className="text-white font-bold text-xl">{item.det_cantidad_pedir !== undefined ? item.det_cantidad_pedir : '-'}</p>
+                    <p className="text-brand-500 text-xs font-semibold">a pedir</p>
+                  </div>
+                  <div className="text-right flex-shrink-0 w-12 border-l border-gray-700 pl-2">
+                    <p className="text-gray-300 font-bold text-sm">{item.det_stock_sala}</p>
+                    <p className="text-gray-500 text-[10px]">sala</p>
                   </div>
                   <button onClick={() => quitar(item.pro_codigo_plu)}
                     className="ml-1 w-8 h-8 rounded-full bg-rose-900/40 hover:bg-rose-600 text-rose-400 hover:text-white transition-all text-sm flex items-center justify-center">
@@ -221,6 +261,24 @@ export default function RevisionPage() {
           {finalizando ? '⏳ Enviando…' : items.length === 0 ? 'Añade productos primero' : `✅ Finalizar Revisión (${items.length})`}
         </button>
       </div>
+
+      {/* Modales */}
+      {calcModal && (
+        <CalculoModal 
+          prod={calcModal} 
+          onClose={() => setCalcModal(null)}
+          onConfirm={(cant) => handleConfirmarPedido(cant, calcModal.isBulk, calcModal)}
+        />
+      )}
+
+      {showNoEscaneados && (
+        <NoEscaneadosModal 
+          revId={revisionId}
+          onClose={() => setShowNoEscaneados(false)}
+          onBulkAdd={handleBulkAdd}
+          onIndividualClick={(prod) => setCalcModal({...prod, stockIngresado: 0, isBulk: true})}
+        />
+      )}
 
       {/* Modal resultado */}
       {modalResult && (
