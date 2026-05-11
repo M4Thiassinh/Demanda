@@ -3,7 +3,7 @@ import Swal from 'sweetalert2'
 
 export default function CalculoModal({ prod, onClose, onConfirm }) {
   // prod tiene: pro_nombre_producto, pro_codigo_plu, demandaTotalRequerida, cantidadAProducir, pedidoMinimo, isBulk
-  const [cantidad, setCantidad] = useState(prod.isBulk ? 0 : (prod.cantidadAProducir > 0 ? prod.cantidadAProducir : 0));
+  const [cantidad, setCantidad] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
