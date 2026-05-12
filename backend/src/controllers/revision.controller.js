@@ -180,7 +180,19 @@ async function finalizarRevision(req, res) {
     });
 
     // Solo productos que se pidió explícitamente > 0
-    const quiebres = resultados.filter((r) => r.cantidadAProducir > 0);
+    let quiebres = resultados.filter((r) => r.cantidadAProducir > 0);
+
+    // Ordenar principalmente ALFABÉTICAMENTE, y en caso de nombres iguales, por cantidad de MAYOR a MENOR
+    quiebres.sort((a, b) => {
+      // 1. Comparar alfabéticamente primero
+      const nameA = (a.pro_nombre_producto || '').toLowerCase();
+      const nameB = (b.pro_nombre_producto || '').toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      
+      // 2. Si se llaman exactamente igual, ordenamos por cantidad de mayor a menor
+      return b.cantidadAProducir - a.cantidadAProducir;
+    });
 
     await db.query(`UPDATE revisiones SET rev_estado = 'completada' WHERE rev_id = ?`, [revId]);
 
