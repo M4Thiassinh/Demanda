@@ -22,10 +22,15 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers['x-admin-password'] = token;
   }
+  const masterToken = localStorage.getItem('masterToken');
+  if (masterToken) {
+    config.headers['x-master-password'] = masterToken;
+  }
   return config;
 });
 
 export const loginAdmin = (password) => api.post('/admin/login', { password }).then(r => r.data)
+export const loginMaster = (password) => api.post('/admin/login-master', { password }).then(r => r.data)
 
 export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
@@ -40,6 +45,12 @@ export const subirCSV = (fd) => api.post('/admin/csv-upload', fd, { headers: { '
 export const getProducto = (plu, depId) => api.get(`/admin/productos/${plu}`, { params: { dep_id: depId } }).then(r => r.data)
 export const updateProducto = (plu, depId, data) => api.put(`/admin/productos/${plu}`, { ...data, dep_id: depId }).then(r => r.data)
 export const exportarExcel = (params) => api.get('/admin/export', { params, responseType: 'blob' })
+
+// Admin Master Panel
+export const getMasterProductos = (depId) => api.get('/admin/master-productos', { params: { dep_id: depId } }).then(r => r.data)
+export const bulkUpdateProductos = (depId, productos) => api.post('/admin/master-productos/bulk', { dep_id: depId, productos }).then(r => r.data)
+export const bulkDeleteProductos = (depId, plus) => api.post('/admin/master-productos/delete', { dep_id: depId, plus }).then(r => r.data)
+export const exportMasterExcel = (depId) => api.get('/admin/master-productos/export', { params: { dep_id: depId }, responseType: 'blob' })
 
 // Revisión
 export const buscarRevisionActiva = (depId, usuId) => api.get('/revision/activa', { params: { dep_id: depId, usu_id: usuId } }).then(r => r.data)

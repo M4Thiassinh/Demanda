@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
 import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, buscarProductos, getProducto, updateProducto, exportarExcel } from '../api'
+import MasterAdminPanel from '../components/admin/MasterAdminPanel'
 
 // ── Tab Configuración ────────────────────────────────────────
 function ConfigTab() {
@@ -276,13 +277,13 @@ function ProductosTab() {
             <input type="text" value={form.pro_codigo_barra} onChange={e => setForm(f => ({ ...f, pro_codigo_barra: e.target.value }))} className="input-field" placeholder="(opcional)" />
           </div>
           <div>
-            <label className="label">Override Días Producción/Semana <span className="text-gray-500 font-normal text-xs">(vacío = usar config depto)</span></label>
+            <label className="label">Días Producción/Semana <span className="text-gray-500 font-normal text-xs">(vacío = usar config depto)</span></label>
             <input type="number" min={1} max={7} value={form.pro_dias_produccion_override}
               onChange={e => setForm(f => ({ ...f, pro_dias_produccion_override: e.target.value }))}
               className="input-field" placeholder="Ej: 2, 3… Vacío = default depto" />
           </div>
           <div>
-            <label className="label">Override Días de Seguridad <span className="text-gray-500 font-normal text-xs">(vacío = lógica automática)</span></label>
+            <label className="label">Días de Seguridad <span className="text-gray-500 font-normal text-xs">(vacío = lógica automática)</span></label>
             <input type="number" min={0} value={form.pro_dias_seguridad_override}
               onChange={e => setForm(f => ({ ...f, pro_dias_seguridad_override: e.target.value }))}
               className="input-field" placeholder="Vacío = auto" />
@@ -431,6 +432,7 @@ export default function AdminPage() {
     { key: 'config',    label: '⚙️ Config' },
     { key: 'csv',       label: '📤 CSV' },
     { key: 'productos', label: '📦 Productos' },
+    { key: 'master',    label: '📊 Maestro' },
     { key: 'export',    label: '📥 Exportar' },
   ]
 
@@ -459,6 +461,7 @@ export default function AdminPage() {
         {tab === 'config'    && <ConfigTab />}
         {tab === 'csv'       && <CsvTab />}
         {tab === 'productos' && <ProductosTab />}
+        {tab === 'master'    && <MasterAdminPanel />}
         {tab === 'export'    && <ExportTab />}
       </div>
     </div>

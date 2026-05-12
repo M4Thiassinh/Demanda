@@ -222,6 +222,180 @@ async function exportarExcel(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// GET /api/admin/master-productos
+async function obtenerMasterProductos(req, res) {
+  try {
+    const { dep_id } = req.query;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
+
+    // Cargar config del departamento
+    const config = await ConfigService.getConfig(dep_id);
+
+    const { rows } = await db.query(
+      `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
+              vta_total_periodo, dias_historial, dep_id,
+              pro_dias_produccion_override, pro_dias_seguridad_override,
+              pro_dias_elaboracion, pro_cantidad_minima
+         FROM productos WHERE dep_id = ?
+        ORDER BY pro_nombre_producto`,
+      [dep_id]
+    );
+
+    // Calcular demanda para cada uno para que el admin lo vea en la tabla
+    const resultados = rows.map((row) => {
+      // Pasamos un stock dummy de 0 porque al master panel no le importa el stock de la sala actual,
+      // solo quiere ver los parámetros maestros (venta diaria, lote, etc).
+      const calc = calcularDemanda(config, row, 0);
+      return {
+        ...row,
+        ventaDiaria: calc.ventaDiaria,
+        demandaTotalRequerida: calc.demandaTotalRequerida
+      };
+    });
+
+    res.json(resultados);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// POST /api/admin/master-productos/bulk
+async function actualizarMasterProductosBulk(req, res) {
+  let connection;
+  try {
+    const { dep_id, productos } = req.body;
+    if (!dep_id || !Array.isArray(productos)) return res.status(400).json({ error: 'Datos inválidos' });
+
+    connection = await db.pool.getConnection();
+    await connection.beginTransaction();
+
+    const toNull = (v) => (v === '' || v === undefined || v === null) ? null : Number(v);
+
+    for (const p of productos) {
+      // Determinar si es un insert (nuevo producto) o un update
+      if (p.isNew) {
+        await connection.query(
+          `INSERT INTO productos 
+            (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id, pro_dias_produccion_override, pro_dias_seguridad_override, pro_cantidad_minima) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            p.pro_codigo_plu, p.pro_codigo_barra || null, p.pro_nombre_producto,
+            toNull(p.vta_total_periodo) || 0, toNull(p.dias_historial) || 30, dep_id,
+            toNull(p.pro_dias_produccion_override), toNull(p.pro_dias_seguridad_override), toNull(p.pro_cantidad_minima) || 0
+          ]
+        );
+      } else {
+        await connection.query(
+          `UPDATE productos
+              SET pro_codigo_barra              = COALESCE(?, pro_codigo_barra),
+                  pro_nombre_producto           = COALESCE(?, pro_nombre_producto),
+                  vta_total_periodo             = COALESCE(?, vta_total_periodo),
+                  dias_historial                = COALESCE(?, dias_historial),
+                  pro_dias_produccion_override  = ?,
+                  pro_dias_seguridad_override   = ?,
+                  pro_cantidad_minima           = ?
+            WHERE pro_codigo_plu = ? AND dep_id = ?`,
+          [
+            p.pro_codigo_barra ?? null, p.pro_nombre_producto ?? null, 
+            toNull(p.vta_total_periodo), toNull(p.dias_historial),
+            toNull(p.pro_dias_produccion_override), toNull(p.pro_dias_seguridad_override), toNull(p.pro_cantidad_minima) || 0,
+            p.pro_codigo_plu, dep_id
+          ]
+        );
+      }
+    }
+
+    await connection.commit();
+    connection.release();
+    res.json({ ok: true, actualizados: productos.length });
+  } catch (err) {
+    if (connection) {
+      await connection.rollback();
+      connection.release();
+    }
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/admin/master-productos/delete
+async function eliminarMasterProductosBulk(req, res) {
+  let connection;
+  try {
+    const { dep_id, plus } = req.body;
+    if (!dep_id || !Array.isArray(plus) || plus.length === 0) return res.status(400).json({ error: 'Datos inválidos' });
+
+    connection = await db.pool.getConnection();
+    await connection.beginTransaction();
+
+    const placeholders = plus.map(() => '?').join(',');
+    const query = `DELETE FROM productos WHERE dep_id = ? AND pro_codigo_plu IN (${placeholders})`;
+    
+    await connection.query(query, [dep_id, ...plus]);
+
+    await connection.commit();
+    connection.release();
+    res.json({ ok: true, eliminados: plus.length });
+  } catch (err) {
+    if (connection) {
+      await connection.rollback();
+      connection.release();
+    }
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/admin/master-productos/export
+async function exportarMasterExcel(req, res) {
+  try {
+    const { dep_id } = req.query;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
+
+    const config = await ConfigService.getConfig(dep_id);
+
+    const { rows } = await db.query(
+      `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
+              vta_total_periodo, dias_historial, dep_id,
+              pro_dias_produccion_override, pro_dias_seguridad_override,
+              pro_cantidad_minima
+         FROM productos WHERE dep_id = ?
+        ORDER BY pro_nombre_producto`,
+      [dep_id]
+    );
+
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Maestro_Productos');
+
+    ws.columns = [
+      { header: 'PLU',                  key: 'pro_codigo_plu',               width: 15 },
+      { header: 'Código Barra',         key: 'pro_codigo_barra',             width: 20 },
+      { header: 'Nombre del Producto',  key: 'pro_nombre_producto',          width: 50 },
+      { header: 'Venta Total Periodo',  key: 'vta_total_periodo',            width: 20 },
+      { header: 'Días Historial',       key: 'dias_historial',               width: 15 },
+      { header: 'Venta Diaria Calc.',   key: 'ventaDiaria',                  width: 20 },
+      { header: 'Días Producción',      key: 'pro_dias_produccion_override', width: 20 },
+      { header: 'Días Stock Seguro',    key: 'pro_dias_seguridad_override',  width: 20 },
+      { header: 'Req. Mínimo (Lote)',   key: 'pro_cantidad_minima',          width: 20 },
+    ];
+
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0284C7' } }; // Azul
+    });
+
+    rows.forEach((row) => {
+      const calc = calcularDemanda(config, row, 0);
+      ws.addRow({
+        ...row,
+        ventaDiaria: calc.ventaDiaria,
+      });
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=maestro_productos_${dep_id}_${Date.now()}.xlsx`);
+    res.send(buffer);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 module.exports = {
   listarDepartamentos, crearDepartamento, actualizarDepartamento,
   listarUsuarios,
@@ -229,4 +403,5 @@ module.exports = {
   subirCSV, buscarProductos,
   obtenerProducto, actualizarProducto,
   exportarExcel,
+  obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, exportarMasterExcel
 };
