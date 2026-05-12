@@ -58,7 +58,13 @@ export default function MasterAdminPanel() {
       setEdits({});
       setSelected(new Set());
     } catch (e) {
-      Swal.fire('Error', 'No se pudieron cargar los productos', 'error');
+      if (e?.response?.status === 401) {
+        localStorage.removeItem('masterToken');
+        setIsAuth(false);
+        Swal.fire('Sesión Expirada', 'Contraseña maestra incorrecta', 'error');
+      } else {
+        Swal.fire('Error', 'No se pudieron cargar los productos', 'error');
+      }
     } finally {
       setLoading(false);
     }
