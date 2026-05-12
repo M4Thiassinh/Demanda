@@ -366,14 +366,12 @@ async function exportarMasterExcel(req, res) {
 
     ws.columns = [
       { header: 'PLU',                  key: 'pro_codigo_plu',               width: 15 },
-      { header: 'Código Barra',         key: 'pro_codigo_barra',             width: 20 },
       { header: 'Nombre del Producto',  key: 'pro_nombre_producto',          width: 50 },
-      { header: 'Venta Total Periodo',  key: 'vta_total_periodo',            width: 20 },
-      { header: 'Días Historial',       key: 'dias_historial',               width: 15 },
-      { header: 'Venta Diaria Calc.',   key: 'ventaDiaria',                  width: 20 },
-      { header: 'Días Producción',      key: 'pro_dias_produccion_override', width: 20 },
-      { header: 'Días Stock Seguro',    key: 'pro_dias_seguridad_override',  width: 20 },
-      { header: 'Req. Mínimo (Lote)',   key: 'pro_cantidad_minima',          width: 20 },
+      { header: 'Vta. Diaria',          key: 'ventaDiaria',                  width: 15 },
+      { header: 'Fact. Prod',           key: 'pro_dias_produccion_override', width: 15 },
+      { header: 'Días Seguridad',       key: 'pro_dias_seguridad_override',  width: 15 },
+      { header: 'Dda Total',            key: 'demandaTotalRequerida',        width: 15 },
+      { header: 'Req. Mínimo',          key: 'pro_cantidad_minima',          width: 15 },
     ];
 
     ws.getRow(1).eachCell((cell) => {
@@ -385,7 +383,8 @@ async function exportarMasterExcel(req, res) {
       const calc = calcularDemanda(config, row, 0);
       ws.addRow({
         ...row,
-        ventaDiaria: calc.ventaDiaria,
+        ventaDiaria: calc.ventaDiaria !== undefined ? Number(calc.ventaDiaria.toFixed(1)) : null,
+        demandaTotalRequerida: calc.demandaTotalRequerida !== undefined ? Number(calc.demandaTotalRequerida.toFixed(1)) : null,
       });
     });
 
