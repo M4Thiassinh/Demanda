@@ -117,10 +117,51 @@ export default function RevisionPage() {
 
   const finalizar = async () => {
     if (!items.length) return setError('Agrega al menos un producto')
-    setFin(true)
-    try { setModal(await finalizarRevision(revisionId)) }
-    catch (e) { setError(e?.response?.data?.error || 'Error al finalizar') }
-    finally { setFin(false) }
+
+    // Fetch the current department info to get default emails
+    let defaultEmails = '';
+    try {
+      const { getDepartamentos } = await import('../api');
+      const deps = await getDepartamentos();
+      const myDep = deps.find(d => d.dep_id === depId);
+      if (myDep) {
+        defaultEmails = [myDep.dep_email_jefe, myDep.dep_emails_cc].filter(Boolean).join(', ');
+      }
+    } catch (e) { console.error('Error fetching dep emails', e); }
+
+    const { isConfirmed, value: customEmails } = await Swal.fire({
+      title: '<h2 class="text-white text-xl font-bold">¿Seguro que deseas enviar esta orden?</h2>',
+      html: `
+        <div class="text-sm text-gray-400 mb-4 text-left bg-gray-800 p-3 rounded-lg border border-gray-700">
+          <p class="font-bold text-gray-300 mb-1">Correos predeterminados del departamento:</p>
+          <p class="text-brand-400 break-words">${defaultEmails || 'Ninguno'}</p>
+        </div>
+        <p class="text-sm text-gray-400 mb-2 text-left">Si quieres agregar otros correos, escríbelos aquí:</p>
+        <input id="swal-input-emails" class="swal2-input !bg-gray-800 !text-white !border-gray-600 !w-full !max-w-[90%] mx-auto block !text-sm placeholder:text-gray-500" placeholder="ejemplo@correo.com, otro@correo.com">
+      `,
+      icon: 'warning',
+      background: '#111827', // gray-900
+      color: '#ffffff',
+      showCancelButton: true,
+      confirmButtonText: 'Enviar y Finalizar',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#059669', // emerald-600
+      cancelButtonColor: '#4b5563', // gray-600
+      preConfirm: () => {
+        return document.getElementById('swal-input-emails').value;
+      }
+    });
+
+    if (isConfirmed) {
+      setFin(true)
+      try { 
+        // Concatenate default and custom emails
+        const finalEmails = [defaultEmails, customEmails].filter(Boolean).join(', ');
+        setModal(await finalizarRevision(revisionId, items, finalEmails)) 
+      }
+      catch (e) { setError(e?.response?.data?.error || 'Error al finalizar') }
+      finally { setFin(false) }
+    }
   }
 
   return (

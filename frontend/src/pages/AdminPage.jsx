@@ -324,6 +324,115 @@ function ProductosTab() {
   )
 }
 
+// ── Tab Usuarios ────────────────────────────────────────────────
+function UsuariosTab() {
+  const [usuarios, setUsuarios] = useState([])
+  const [nombre, setNombre] = useState('')
+  const [editId, setEditId] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const cargar = async () => {
+    try {
+      const { getUsuarios } = await import('../api')
+      const res = await getUsuarios()
+      setUsuarios(res)
+    } catch { setError('Error al cargar usuarios') }
+  }
+
+  useEffect(() => { cargar() }, [])
+
+  const guardar = async (e) => {
+    e.preventDefault()
+    if (!nombre.trim()) return
+    setLoading(true); setError('')
+    try {
+      const { crearUsuario, actualizarUsuario } = await import('../api')
+      if (editId) {
+        await actualizarUsuario(editId, { usu_nombre: nombre })
+      } else {
+        await crearUsuario({ usu_nombre: nombre })
+      }
+      setNombre('')
+      setEditId(null)
+      await cargar()
+    } catch (e) { setError('Error al guardar') }
+    finally { setLoading(false) }
+  }
+
+  const eliminar = async (id, nombreUsu) => {
+    import('sweetalert2').then(async (Swal) => {
+      const { isConfirmed } = await Swal.default.fire({
+        title: '¿Eliminar operador?',
+        text: `Se borrará a "${nombreUsu}". Esto no afectará su historial previo, pero ya no podrá iniciar nuevas revisiones.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#4b5563',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+      })
+      if (isConfirmed) {
+        setLoading(true)
+        try {
+          const { eliminarUsuario } = await import('../api')
+          await eliminarUsuario(id)
+          await cargar()
+        } catch { setError('Error al eliminar') }
+        finally { setLoading(false) }
+      }
+    })
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <form onSubmit={guardar} className="card p-5 space-y-4">
+        <h2 className="text-white font-bold">{editId ? 'Editar Usuario' : 'Nuevo Usuario'}</h2>
+        <div>
+          <label className="label">Nombre del Operador</label>
+          <input type="text" value={nombre} onChange={e => setNombre(e.target.value)}
+            className="input-field" placeholder="Ej: Juan Pérez" autoFocus />
+        </div>
+        {error && <p className="text-rose-400 text-sm text-center">{error}</p>}
+        <div className="flex gap-3">
+          <button type="submit" disabled={loading || !nombre.trim()} className="btn-primary flex-1">
+            {loading ? 'Guardando...' : (editId ? 'Actualizar' : 'Crear Usuario')}
+          </button>
+          {editId && (
+            <button type="button" onClick={() => { setEditId(null); setNombre('') }} className="btn-secondary px-4">
+              Cancelar
+            </button>
+          )}
+        </div>
+      </form>
+
+      <div className="card overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-700/50">
+          <p className="text-white font-semibold text-sm">Operadores Registrados ({usuarios.length})</p>
+        </div>
+        <div className="divide-y divide-gray-700/40">
+          {usuarios.map(u => (
+            <div key={u.usu_id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-700/20">
+              <span className="text-white font-medium text-sm">{u.usu_nombre}</span>
+              <div className="flex gap-2">
+                <button onClick={() => { setEditId(u.usu_id); setNombre(u.usu_nombre) }}
+                  className="text-brand-400 hover:text-brand-300 text-xs px-2 py-1 bg-brand-900/30 rounded-lg">
+                  Editar
+                </button>
+                <button onClick={() => eliminar(u.usu_id, u.usu_nombre)}
+                  className="text-rose-400 hover:text-rose-300 text-xs px-2 py-1 bg-rose-900/30 rounded-lg">
+                  Eliminar
+                </button>
+              </div>
+            </div>
+          ))}
+          {usuarios.length === 0 && <p className="text-center py-6 text-gray-500 text-sm">No hay usuarios</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tab Exportar ──────────────────────────────────────────────
 function ExportTab() {
   const [departamentos, setDeps] = useState([])
@@ -338,6 +447,7 @@ function ExportTab() {
   const exportar = async () => {
     setLoading(true); setError('')
     try {
+      const { exportarExcel } = await import('../api')
       const resp = await exportarExcel({ dep_id: depSel || undefined, fecha_ini: fechaIni || undefined, fecha_fin: fechaFin || undefined })
       const url  = URL.createObjectURL(resp.data)
       const a    = document.createElement('a'); a.href = url; a.download = `reposicion_${Date.now()}.xlsx`; a.click()
@@ -430,6 +540,7 @@ export default function AdminPage() {
 
   const tabs = [
     { key: 'config',    label: '⚙️ Config' },
+    { key: 'usuarios',  label: '👥 Usuarios' },
     { key: 'csv',       label: '📤 CSV' },
     { key: 'productos', label: '📦 Productos' },
     { key: 'master',    label: '📊 Maestro' },
@@ -459,6 +570,7 @@ export default function AdminPage() {
 
       <div className="p-5 animate-fade-in">
         {tab === 'config'    && <ConfigTab />}
+        {tab === 'usuarios'  && <UsuariosTab />}
         {tab === 'csv'       && <CsvTab />}
         {tab === 'productos' && <ProductosTab />}
         {tab === 'master'    && <MasterAdminPanel />}

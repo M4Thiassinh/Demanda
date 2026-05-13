@@ -395,12 +395,39 @@ async function exportarMasterExcel(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// POST /api/admin/usuarios
+async function crearUsuario(req, res) {
+  try {
+    const { usu_nombre } = req.body;
+    if (!usu_nombre) return res.status(400).json({ error: 'Nombre requerido' });
+    await db.query(`INSERT INTO usuarios (usu_nombre) VALUES (?)`, [usu_nombre]);
+    res.status(201).json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// PUT /api/admin/usuarios/:id
+async function actualizarUsuario(req, res) {
+  try {
+    const { usu_nombre } = req.body;
+    if (!usu_nombre) return res.status(400).json({ error: 'Nombre requerido' });
+    await db.query(`UPDATE usuarios SET usu_nombre = ? WHERE usu_id = ?`, [usu_nombre, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// DELETE /api/admin/usuarios/:id
+async function eliminarUsuario(req, res) {
+  try {
+    await db.query(`DELETE FROM usuarios WHERE usu_id = ?`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 module.exports = {
   listarDepartamentos, crearDepartamento, actualizarDepartamento,
-  listarUsuarios,
+  listarUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario,
   obtenerConfig, actualizarConfig,
-  subirCSV, buscarProductos,
-  obtenerProducto, actualizarProducto,
-  exportarExcel,
+  subirCSV,
+  buscarProductos, obtenerProducto, actualizarProducto, exportarExcel,
   obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, exportarMasterExcel
 };

@@ -138,6 +138,8 @@ async function obtenerNoEscaneados(req, res) {
 async function finalizarRevision(req, res) {
   try {
     const { revId } = req.params;
+    const { items, emails_to } = req.body;
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Revisión vacía' });
 
     const revRes = await db.query(
       `SELECT r.rev_id, r.rev_folio, r.dep_id, r.rev_fecha,
@@ -194,13 +196,15 @@ async function finalizarRevision(req, res) {
       return b.cantidadAProducir - a.cantidadAProducir;
     });
 
+
+
     await db.query(`UPDATE revisiones SET rev_estado = 'completada' WHERE rev_id = ?`, [revId]);
 
     if (quiebres.length > 0) {
       await enviarOrdenProduccion({
         depNombre: rev.dep_nombre,
-        depEmail:  rev.dep_email_jefe,
-        depEmailsCc: rev.dep_emails_cc,
+        depEmail:  emails_to || rev.dep_email_jefe,
+        depEmailsCc: emails_to ? null : rev.dep_emails_cc,
         revFecha:  rev.rev_fecha,
         folio:     rev.rev_folio,
         usuNombre: rev.usu_nombre,

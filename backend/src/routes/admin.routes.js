@@ -65,6 +65,9 @@ router.use('/admin',                      authAdmin);
 
 router.post('/departamentos',             ctrl.crearDepartamento);
 router.put('/departamentos/:depId',       ctrl.actualizarDepartamento);
+router.post('/admin/usuarios',            ctrl.crearUsuario);
+router.put('/admin/usuarios/:id',         ctrl.actualizarUsuario);
+router.delete('/admin/usuarios/:id',      ctrl.eliminarUsuario);
 router.get('/admin/config/:depId',        ctrl.obtenerConfig);
 router.put('/admin/config/:depId',        ctrl.actualizarConfig);
 router.post('/admin/csv-upload',          upload.single('file'), ctrl.subirCSV);

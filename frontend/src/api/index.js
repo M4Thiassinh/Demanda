@@ -36,6 +36,9 @@ export const getDepartamentos = () => api.get('/departamentos').then(r => r.data
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
 export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
+export const crearUsuario = (data) => api.post('/admin/usuarios', data).then(r => r.data)
+export const actualizarUsuario = (id, data) => api.put(`/admin/usuarios/${id}`, data).then(r => r.data)
+export const eliminarUsuario = (id) => api.delete(`/admin/usuarios/${id}`).then(r => r.data)
 export const buscarProductos = (depId, q) => api.get('/productos', { params: { dep_id: depId, q } }).then(r => r.data)
 
 // Admin
@@ -61,6 +64,6 @@ export const agregarDetalleBulk = (revId, items) => api.post(`/revision/${revId}
 export const obtenerNoEscaneados = (revId) => api.get(`/revision/${revId}/no-escaneados`).then(r => r.data)
 export const obtenerRevision = (revId) => api.get(`/revision/${revId}`).then(r => r.data)
 export const eliminarDetalle = (revId, plu) => api.delete(`/revision/${revId}/detalle/${plu}`).then(r => r.data)
-export const finalizarRevision = (revId) => api.post(`/revision/${revId}/finalizar`).then(r => r.data)
+export const finalizarRevision = (revId, items, emails_to) => api.post(`/revision/${revId}/finalizar`, { items, emails_to }).then(r => r.data)
 
 export default api
