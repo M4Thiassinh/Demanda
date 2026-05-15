@@ -144,22 +144,42 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
 
   const cantLabel = esProduccion ? 'Cant. Pedir' : 'Requerimiento';
 
-  const filas = quiebres.map((q) => `
+  const filasProduccion = quiebres.map((q) => `
     <tr>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${esProduccion ? '#ea580c' : '#1d4ed8'};font-size:17px;">${q.cantidadAProducir}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#ea580c;font-size:17px;">${q.cantidadAProducir}</td>
     </tr>`).join('');
 
-  const headerColor = esProduccion
-    ? 'linear-gradient(135deg,#ea580c,#f97316)'
-    : 'linear-gradient(135deg,#1d4ed8,#3b82f6)';
-  const titulo = esProduccion ? '📋 Orden de Producción' : '📦 Reporte de Reposición';
+  const filasReposicion = quiebres.map((q) => `
+    <tr>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${Number((q.demandaTotalRequerida || 0).toFixed(1))}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.det_stock_sala ?? 0}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#1d4ed8;font-size:17px;">${q.cantidadAProducir}</td>
+    </tr>`).join('');
+
+  const filas = esProduccion ? filasProduccion : filasReposicion;
+
+  const headersProduccion = `
+    <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
+    <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
+    <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Cant. Pedir</th>`;
+
+  const headersReposicion = `
+    <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
+    <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
+    <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Demanda Calc.</th>
+    <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Stock Sala</th>
+    <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Requerimiento</th>`;
+
+  const headers = esProduccion ? headersProduccion : headersReposicion;
 
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
   <tr><td align="center">
-  <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+  <table width="660" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
     <tr><td style="background:${headerColor};padding:24px 28px;color:#fff;">
       <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:2px;opacity:.8;">Teja Market — Sistema de Reposición</p>
       <h1 style="margin:6px 0 0;font-size:22px;">${titulo}</h1>
@@ -176,9 +196,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
     <tr><td style="padding:20px 28px;">
       <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <thead><tr style="background:#1e293b;color:#fff;">
-          <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
-          <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
-          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">${cantLabel}</th>
+          ${headers}
         </tr></thead>
         <tbody>${filas}</tbody>
       </table>
