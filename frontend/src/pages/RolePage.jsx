@@ -5,7 +5,7 @@ import { getDepartamentos, getUsuarios, iniciarRevision, buscarRevisionActiva } 
 
 export default function RolePage() {
   const navigate = useNavigate()
-  const { setRole, setDepartamento, setUsuario, setRevision, role } = useAppStore()
+  const { setRole, setDepartamento, setUsuario, setRevision, clearRevision, role } = useAppStore()
 
   const [departamentos, setDepartamentos] = useState([])
   const [usuarios, setUsuarios]           = useState([])
@@ -26,6 +26,9 @@ export default function RolePage() {
     try {
       const dep = departamentos.find(d => d.dep_id === depSel)
       const usu = usuarios.find(u => String(u.usu_id) === String(usuSel))
+
+      // Siempre limpiar estado local antes de cargar una revisión (previene fuga de estado)
+      clearRevision()
       setDepartamento(dep)
       setUsuario(usu)
 

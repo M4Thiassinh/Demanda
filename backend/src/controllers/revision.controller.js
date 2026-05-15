@@ -3,6 +3,8 @@ const ConfigService             = require('../services/ConfigService');
 const { calcularDemanda }       = require('../services/DemandCalculatorService');
 const { enviarOrdenProduccion } = require('../services/EmailService');
 
+const AREAS_PRODUCTIVAS = [22, 1347, 2347];
+
 function generarFolio(depId) {
   const now   = new Date();
   const fecha = now.toISOString().slice(0, 10).replace(/-/g, '');
@@ -17,9 +19,9 @@ async function buscarRevisionActiva(req, res) {
     const { rows } = await db.query(
       `SELECT rev_id, rev_folio, rev_fecha
          FROM revisiones
-        WHERE dep_id = ? AND rev_estado = 'en_proceso'
+        WHERE dep_id = ? AND usu_id = ? AND rev_estado = 'en_proceso'
         ORDER BY rev_fecha DESC LIMIT 1`,
-      [dep_id]
+      [dep_id, usu_id]
     );
     res.json(rows[0] || null);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -173,34 +175,36 @@ async function finalizarRevision(req, res) {
       [revId, rev.dep_id]
     );
 
+    const esProductivo = AREAS_PRODUCTIVAS.includes(Number(rev.dep_id));
+
     const resultados = detRes.rows.map((item) => {
       const calc = calcularDemanda(config, item, item.det_stock_sala, rev.rev_fecha);
+      const requerimiento = Math.max(0, (calc.demandaTotalRequerida || 0) - (item.det_stock_sala || 0));
       return {
         ...item,
         ...calc,
         fue_escaneado: true,
-        cantidadAProducir: item.det_cantidad_pedir || 0, // Override final amount with user choice
-        sugerenciaSistema: calc.cantidadAProducir, // Keep the math for the excel
-        pedidoMinimo: item.pro_cantidad_minima || 0
+        // Para productivo: el usuario digitó la cantidad. Para no productivo: calculamos el requerimiento.
+        cantidadAProducir: esProductivo
+          ? (item.det_cantidad_pedir || 0)
+          : Math.ceil(requerimiento),
+        sugerenciaSistema: calc.cantidadAProducir,
+        pedidoMinimo: item.pro_cantidad_minima || 0,
+        requerimiento,
       };
     });
 
-    // Solo productos que se pidió explícitamente > 0
+    // Solo productos que requieren pedido > 0
     let quiebres = resultados.filter((r) => r.cantidadAProducir > 0);
 
-    // Ordenar principalmente ALFABÉTICAMENTE, y en caso de nombres iguales, por cantidad de MAYOR a MENOR
+    // Ordenar alfabéticamente, luego por cantidad de mayor a menor
     quiebres.sort((a, b) => {
-      // 1. Comparar alfabéticamente primero
       const nameA = (a.pro_nombre_producto || '').toLowerCase();
       const nameB = (b.pro_nombre_producto || '').toLowerCase();
       if (nameA < nameB) return -1;
       if (nameA > nameB) return 1;
-      
-      // 2. Si se llaman exactamente igual, ordenamos por cantidad de mayor a menor
       return b.cantidadAProducir - a.cantidadAProducir;
     });
-
-
 
     await db.query(`UPDATE revisiones SET rev_estado = 'completada' WHERE rev_id = ?`, [revId]);
 
@@ -213,6 +217,7 @@ async function finalizarRevision(req, res) {
         folio:     rev.rev_folio,
         usuNombre: rev.usu_nombre,
         quiebres,
+        tipo: esProductivo ? 'produccion' : 'reposicion',
       });
     }
 

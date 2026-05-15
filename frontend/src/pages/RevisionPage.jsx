@@ -8,9 +8,12 @@ import NoEscaneadosModal from '../components/operator/NoEscaneadosModal'
 import RevisionMasiva from '../components/operator/RevisionMasiva'
 import Swal from 'sweetalert2'
 
+const AREAS_PRODUCTIVAS = [22, 1347, 2347];
+
 export default function RevisionPage() {
   const navigate = useNavigate()
   const { depId, depNombre, usuNombre, revisionId, revFolio, items, addItem, removeItem, clearRevision, reset } = useAppStore()
+  const esProductivo = AREAS_PRODUCTIVAS.includes(Number(depId))
 
   const [query, setQuery]           = useState('')
   const [resultados, setRes]        = useState([])
@@ -83,7 +86,29 @@ export default function RevisionPage() {
     setGuardando(true); setError('')
     try {
       const calcInfo = await calcularItem(revisionId, productoSel.pro_codigo_plu, parseInt(stock))
-      setCalcModal({ ...productoSel, ...calcInfo, stockIngresado: parseInt(stock) })
+
+      if (esProductivo) {
+        // Flujo Productivo: abrir modal para que el operador confirme la cantidad
+        setCalcModal({ ...productoSel, ...calcInfo, stockIngresado: parseInt(stock) })
+      } else {
+        // Flujo No Productivo: agregar directo con el requerimiento calculado
+        const requerimiento = Math.max(0, Math.ceil((calcInfo.demandaTotalRequerida || 0) - parseInt(stock)))
+        await agregarDetalle(revisionId, productoSel.pro_codigo_plu, parseInt(stock), requerimiento)
+        addItem({ ...productoSel, det_stock_sala: parseInt(stock), det_cantidad_pedir: requerimiento })
+        setProducto(null); setStock(''); setQuery('')
+        // Flash informativo
+        Swal.fire({
+          title: requerimiento > 0 ? `✅ Añadido` : '✅ Sin reposición',
+          text: requerimiento > 0
+            ? `Requerimiento: ${requerimiento} uds.`
+            : `${productoSel.pro_nombre_producto} tiene stock suficiente`,
+          timer: 1800,
+          showConfirmButton: false,
+          icon: requerimiento > 0 ? 'success' : 'info',
+          background: '#111827',
+          color: '#fff',
+        })
+      }
     } catch (e) { setError(e?.response?.data?.error || 'Error al calcular') }
     finally { setGuardando(false) }
   }
@@ -274,7 +299,7 @@ export default function RevisionPage() {
             </div>
           </>
         ) : (
-          <RevisionMasiva revisionId={revisionId} />
+          <RevisionMasiva revisionId={revisionId} esProductivo={esProductivo} />
         )}
 
         {/* Lista de ítems */}
