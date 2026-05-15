@@ -108,17 +108,21 @@ async function calcularItem(req, res) {
 async function obtenerNoEscaneados(req, res) {
   try {
     const { revId } = req.params;
+    const { all } = req.query;
     const revRes = await db.query(`SELECT dep_id, rev_fecha FROM revisiones WHERE rev_id = ?`, [revId]);
     if (!revRes.rows.length) return res.status(404).json({ error: 'Revisión no encontrada' });
     const rev = revRes.rows[0];
 
-    // Traer todos los productos del departamento que no estén en la revisión
+    // Traer todos los productos del departamento (si all=true) o solo los no escaneados
     const prodRes = await db.query(
-      `SELECT p.* 
-       FROM productos p
-       LEFT JOIN detalle_revision dr ON dr.pro_codigo_plu = p.pro_codigo_plu AND dr.rev_id = ?
-       WHERE p.dep_id = ? AND dr.det_id IS NULL`,
-      [revId, rev.dep_id]
+      all === 'true'
+        ? `SELECT p.* FROM productos p WHERE p.dep_id = ? ORDER BY p.pro_nombre_producto`
+        : `SELECT p.* 
+           FROM productos p
+           LEFT JOIN detalle_revision dr ON dr.pro_codigo_plu = p.pro_codigo_plu AND dr.rev_id = ?
+           WHERE p.dep_id = ? AND dr.det_id IS NULL
+           ORDER BY p.pro_nombre_producto`,
+      all === 'true' ? [rev.dep_id] : [revId, rev.dep_id]
     );
 
     const config = await ConfigService.getConfig(rev.dep_id);

@@ -1,19 +1,23 @@
 import { useState, useEffect } from 'react'
 import { obtenerNoEscaneados } from '../../api'
+import useAppStore from '../../store/useAppStore'
 
 export default function NoEscaneadosModal({ revId, onClose, onIndividualClick, onBulkAdd }) {
-  const [productos, setProductos] = useState([]);
+  const [rawProductos, setRawProductos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [seleccionados, setSeleccionados] = useState(new Set());
+  const items = useAppStore(s => s.items);
 
   useEffect(() => {
     obtenerNoEscaneados(revId)
       .then(res => {
-        setProductos(res);
+        setRawProductos(res);
         setCargando(false);
       })
       .catch(() => setCargando(false));
   }, [revId]);
+
+  const productos = rawProductos.filter(p => !items.some(i => i.pro_codigo_plu === p.pro_codigo_plu));
 
   const toggleSelect = (plu) => {
     const newSet = new Set(seleccionados);

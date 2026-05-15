@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
-import { buscarProductos, agregarDetalle, eliminarDetalle, finalizarRevision, obtenerRevision } from '../api'
+import { buscarProductos, agregarDetalle, eliminarDetalle, finalizarRevision, obtenerRevision, calcularItem, agregarDetalleBulk } from '../api'
 import BarcodeScanner from '../components/operator/BarcodeScanner'
 import CalculoModal from '../components/operator/CalculoModal'
 import NoEscaneadosModal from '../components/operator/NoEscaneadosModal'
-import { calcularItem, agregarDetalleBulk } from '../api'
+import RevisionMasiva from '../components/operator/RevisionMasiva'
 import Swal from 'sweetalert2'
+
 export default function RevisionPage() {
   const navigate = useNavigate()
   const { depId, depNombre, usuNombre, revisionId, revFolio, items, addItem, removeItem, clearRevision, reset } = useAppStore()
@@ -17,6 +18,7 @@ export default function RevisionPage() {
   const [stock, setStock]           = useState('')
   const [guardando, setGuardando]   = useState(false)
   const [finalizando, setFin]       = useState(false)
+  const [viewMode, setViewMode]     = useState('search') // 'search' | 'masiva'
   const [modalResult, setModal]     = useState(null)
   const [escaner, setEscaner]       = useState(false)
   const [error, setError]           = useState('')
@@ -181,76 +183,99 @@ export default function RevisionPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-32">
-        {/* Buscador dual: nombre/PLU/código de barras */}
-        <div className="card p-4 space-y-3">
-          <div className="relative">
-            <label className="label">PLU, código de barras o nombre</label>
-            <div className="flex gap-2 relative">
-              <input id="input-buscar" type="text" value={query} onChange={e => buscar(e.target.value)}
-                onFocus={() => resultados.length && setRes(resultados)}
-                placeholder="Escanea o escribe…" className="input-field py-4 text-base flex-1 pr-10"
-                autoComplete="off" />
-              {query && (
-                <button onClick={() => { setQuery(''); setProducto(null); setRes([]) }}
-                  className="absolute right-20 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xl p-2 z-10">✕</button>
-              )}
-              <button
-                id="btn-camara"
-                onClick={() => setEscaner(true)}
-                title="Escanear con cámara"
-                className="flex-shrink-0 w-14 bg-gray-700 hover:bg-brand-600 border border-gray-600 hover:border-brand-500 rounded-xl flex items-center justify-center text-2xl transition-all active:scale-95"
-              >📷</button>
-            </div>
-            {resultados.length > 0 && (
-              <ul className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
-                {resultados.map(p => (
-                  <li key={p.pro_codigo_plu} onClick={() => seleccionar(p)}
-                    className="flex items-center justify-between px-4 py-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700/40 last:border-0">
-                    <div>
-                      <p className="text-white text-sm font-medium">{p.pro_nombre_producto}</p>
-                      <p className="text-gray-400 text-xs font-mono">PLU {p.pro_codigo_plu}
-                        {p.pro_codigo_barra && <span className="ml-2 text-gray-500">| {p.pro_codigo_barra}</span>}
-                      </p>
-                    </div>
-                    <span className="text-brand-400 text-xs font-semibold">Selec.</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {productoSel && (
-            <div className="bg-brand-900/30 border border-brand-700/40 rounded-xl px-4 py-3 animate-fade-in">
-              <p className="text-brand-300 font-semibold text-sm">{productoSel.pro_nombre_producto}</p>
-              <p className="text-brand-500 text-xs font-mono">PLU {productoSel.pro_codigo_plu}</p>
-              {items.some(i => i.pro_codigo_plu === productoSel.pro_codigo_plu) && (
-                <p className="text-orange-400 text-xs mt-1 font-medium">⚠️ Ya escaneado anteriormente</p>
-              )}
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="input-stock" className="label">Stock encontrado en sala</label>
-            <input ref={stockRef} id="input-stock" type="number" inputMode="numeric" min={0}
-              value={stock} onChange={e => setStock(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && agregar()}
-              placeholder="0" className="input-field text-4xl font-bold text-center py-5" />
-          </div>
-
-          {error && <p className="text-rose-400 text-sm text-center animate-fade-in">{error}</p>}
-
-          <button id="btn-anadir" onClick={agregar} disabled={guardando || !productoSel || stock === ''}
-            className="btn-primary w-full disabled:opacity-40">
-            {guardando ? 'Guardando…' : '+ Añadir a lista'}
+        
+        {/* Toggle View Mode */}
+        <div className="flex bg-gray-900 rounded-xl p-1 border border-gray-700">
+          <button 
+            onClick={() => setViewMode('search')}
+            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${viewMode === 'search' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+          >
+            🔍 Buscar / Escanear
+          </button>
+          <button 
+            onClick={() => setViewMode('masiva')}
+            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${viewMode === 'masiva' ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+          >
+            📄 Desplegar Todos
           </button>
         </div>
 
-        {/* Botón Ver No Escaneados */}
-        <div className="flex justify-center mt-2 mb-2">
-          <button onClick={() => setShowNoEscaneados(true)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-brand-400 font-semibold rounded-xl text-sm transition-colors border border-gray-700">
-            🔍 Ver Productos No Escaneados
-          </button>
-        </div>
+        {viewMode === 'search' ? (
+          <>
+            {/* Buscador dual: nombre/PLU/código de barras */}
+            <div className="card p-4 space-y-3">
+              <div className="relative">
+                <label className="label">PLU, código de barras o nombre</label>
+                <div className="flex gap-2 relative">
+                  <input id="input-buscar" type="text" value={query} onChange={e => buscar(e.target.value)}
+                    onFocus={() => resultados.length && setRes(resultados)}
+                    placeholder="Escanea o escribe…" className="input-field py-4 text-base flex-1 pr-10"
+                    autoComplete="off" />
+                  {query && (
+                    <button onClick={() => { setQuery(''); setProducto(null); setRes([]) }}
+                      className="absolute right-20 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xl p-2 z-10">✕</button>
+                  )}
+                  <button
+                    id="btn-camara"
+                    onClick={() => setEscaner(true)}
+                    title="Escanear con cámara"
+                    className="flex-shrink-0 w-14 bg-gray-700 hover:bg-brand-600 border border-gray-600 hover:border-brand-500 rounded-xl flex items-center justify-center text-2xl transition-all active:scale-95"
+                  >📷</button>
+                </div>
+                {resultados.length > 0 && (
+                  <ul className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                    {resultados.map(p => (
+                      <li key={p.pro_codigo_plu} onClick={() => seleccionar(p)}
+                        className="flex items-center justify-between px-4 py-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700/40 last:border-0">
+                        <div>
+                          <p className="text-white text-sm font-medium">{p.pro_nombre_producto}</p>
+                          <p className="text-gray-400 text-xs font-mono">PLU {p.pro_codigo_plu}
+                            {p.pro_codigo_barra && <span className="ml-2 text-gray-500">| {p.pro_codigo_barra}</span>}
+                          </p>
+                        </div>
+                        <span className="text-brand-400 text-xs font-semibold">Selec.</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {productoSel && (
+                <div className="bg-brand-900/30 border border-brand-700/40 rounded-xl px-4 py-3 animate-fade-in">
+                  <p className="text-brand-300 font-semibold text-sm">{productoSel.pro_nombre_producto}</p>
+                  <p className="text-brand-500 text-xs font-mono">PLU {productoSel.pro_codigo_plu}</p>
+                  {items.some(i => i.pro_codigo_plu === productoSel.pro_codigo_plu) && (
+                    <p className="text-orange-400 text-xs mt-1 font-medium">⚠️ Ya escaneado anteriormente</p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="input-stock" className="label">Stock encontrado en sala</label>
+                <input ref={stockRef} id="input-stock" type="number" inputMode="numeric" min={0}
+                  value={stock} onChange={e => setStock(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && agregar()}
+                  placeholder="0" className="input-field text-4xl font-bold text-center py-5" />
+              </div>
+
+              {error && <p className="text-rose-400 text-sm text-center animate-fade-in">{error}</p>}
+
+              <button id="btn-anadir" onClick={agregar} disabled={guardando || !productoSel || stock === ''}
+                className="btn-primary w-full disabled:opacity-40">
+                {guardando ? 'Guardando…' : '+ Añadir a lista'}
+              </button>
+            </div>
+
+            {/* Botón Ver No Escaneados */}
+            <div className="flex justify-center mt-2 mb-2">
+              <button onClick={() => setShowNoEscaneados(true)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-brand-400 font-semibold rounded-xl text-sm transition-colors border border-gray-700">
+                📄 Ver lista de no escaneados
+              </button>
+            </div>
+          </>
+        ) : (
+          <RevisionMasiva revisionId={revisionId} />
+        )}
 
         {/* Lista de ítems */}
         {items.length > 0 && (

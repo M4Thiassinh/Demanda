@@ -62,6 +62,7 @@ export const calcularItem = (revId, plu, stock) => api.post(`/revision/${revId}/
 export const agregarDetalle = (revId, plu, stock, cantidad_pedir) => api.post(`/revision/${revId}/detalle`, { pro_codigo_plu: plu, det_stock_sala: stock, cantidad_pedir }).then(r => r.data)
 export const agregarDetalleBulk = (revId, items) => api.post(`/revision/${revId}/detalle/bulk`, { items }).then(r => r.data)
 export const obtenerNoEscaneados = (revId) => api.get(`/revision/${revId}/no-escaneados`).then(r => r.data)
+export const obtenerTodosRevision = (revId) => api.get(`/revision/${revId}/no-escaneados?all=true`).then(r => r.data)
 export const obtenerRevision = (revId) => api.get(`/revision/${revId}`).then(r => r.data)
 export const eliminarDetalle = (revId, plu) => api.delete(`/revision/${revId}/detalle/${plu}`).then(r => r.data)
 export const finalizarRevision = (revId, items, emails_to) => api.post(`/revision/${revId}/finalizar`, { items, emails_to }).then(r => r.data)

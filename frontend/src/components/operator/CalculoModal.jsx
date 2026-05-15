@@ -50,7 +50,9 @@ export default function CalculoModal({ prod, onClose, onConfirm }) {
             </div>
             <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
               <p className="text-gray-400 text-xs">Requerimiento</p>
-              <p className="text-rose-400 font-semibold text-lg">{formatNum((prod.demandaTotalRequerida || 0) - (prod.stockIngresado || 0))}</p>
+              <p className={`font-semibold text-lg ${((prod.demandaTotalRequerida || 0) - (prod.stockIngresado || 0)) > 0 ? 'text-white' : 'text-rose-400'}`}>
+                {formatNum((prod.demandaTotalRequerida || 0) - (prod.stockIngresado || 0))}
+              </p>
             </div>
             <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
               <p className="text-gray-400 text-xs">Pedido Mínimo</p>
