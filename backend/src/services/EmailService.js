@@ -176,6 +176,11 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
 
   const headers = esProduccion ? headersProduccion : headersReposicion;
 
+  const headerColor = esProduccion
+    ? 'linear-gradient(135deg,#ea580c,#f97316)'
+    : 'linear-gradient(135deg,#1d4ed8,#3b82f6)';
+  const titulo = esProduccion ? '📋 Orden de Producción' : '📦 Reporte de Reposición';
+
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
   <tr><td align="center">
