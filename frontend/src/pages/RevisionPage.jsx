@@ -118,7 +118,7 @@ export default function RevisionPage() {
       if (isBulk) {
         // Individual desde modal de no escaneados
         await agregarDetalle(revisionId, prodBulk.pro_codigo_plu, 0, cantidadPedir)
-        addItem({ ...prodBulk, det_stock_sala: 0, det_cantidad_pedir: cantidadPedir })
+        addItem({ ...prodBulk, det_stock_sala: 0, det_cantidad_pedir: cantidadPedir, pro_nombre_producto: `${prodBulk.pro_nombre_producto} (No escaneado)` })
       } else {
         // Normal desde escaner
         await agregarDetalle(revisionId, calcModal.pro_codigo_plu, calcModal.stockIngresado, cantidadPedir)
@@ -132,7 +132,7 @@ export default function RevisionPage() {
   const handleBulkAdd = async (itemsToAdd) => {
     try {
       await agregarDetalleBulk(revisionId, itemsToAdd)
-      itemsToAdd.forEach(i => addItem({ pro_codigo_plu: i.pro_codigo_plu, det_stock_sala: 0, det_cantidad_pedir: i.cantidad_pedir, pro_nombre_producto: 'Producto (No escaneado)' }))
+      itemsToAdd.forEach(i => addItem({ pro_codigo_plu: i.pro_codigo_plu, det_stock_sala: 0, det_cantidad_pedir: i.cantidad_pedir, pro_nombre_producto: i.pro_nombre_producto ? `${i.pro_nombre_producto} (No escaneado)` : 'Producto (No escaneado)' }))
       setShowNoEscaneados(false)
       Swal.fire({title: 'Lote añadido', timer: 1500, showConfirmButton: false, icon: 'success'});
     } catch (e) { setError(e?.response?.data?.error || 'Error al guardar lote') }

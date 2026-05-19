@@ -32,7 +32,8 @@ export default function NoEscaneadosModal({ revId, onClose, onIndividualClick, o
       .filter(p => seleccionados.has(p.pro_codigo_plu))
       .map(p => ({
         pro_codigo_plu: p.pro_codigo_plu,
-        cantidad_pedir: p.pro_cantidad_minima > 0 ? p.pro_cantidad_minima : p.cantidadAProducir
+        pro_nombre_producto: p.pro_nombre_producto,
+        cantidad_pedir: Math.max(Number(p.cantidadAProducir || 0), Number(p.pro_cantidad_minima || 0))
       }));
     onBulkAdd(itemsToAdd);
   };
