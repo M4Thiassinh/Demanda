@@ -110,7 +110,7 @@ async function generarExcelReposicion(quiebres, depNombre, folio, fecha) {
       dep:           depNombre,
       plu:           q.pro_codigo_plu,
       nombre:        q.pro_nombre_producto,
-      demanda:       q.demandaTotalRequerida,
+      demanda:       Math.round(q.demandaTotalRequerida || 0),
       stock:         q.det_stock_sala,
       requerimiento: q.cantidadAProducir,
     });
@@ -155,7 +155,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
     <tr>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${Number((q.demandaTotalRequerida || 0).toFixed(1))}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${Math.round(q.demandaTotalRequerida || 0)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.det_stock_sala ?? 0}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#1d4ed8;font-size:17px;">${q.cantidadAProducir}</td>
     </tr>`).join('');

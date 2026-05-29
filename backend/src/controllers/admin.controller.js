@@ -384,6 +384,8 @@ async function exportarMasterExcel(req, res) {
       ws.addRow({
         ...row,
         ventaDiaria: calc.ventaDiaria !== undefined ? Number(calc.ventaDiaria.toFixed(1)) : null,
+        pro_dias_produccion_override: calc.diasProdEfectivo,
+        pro_dias_seguridad_override: calc.diasSegEfectivo,
         demandaTotalRequerida: calc.demandaTotalRequerida !== undefined ? Number(calc.demandaTotalRequerida.toFixed(1)) : null,
       });
     });
