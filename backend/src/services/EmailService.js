@@ -132,6 +132,44 @@ async function generarExcelReposicion(quiebres, depNombre, folio, fecha) {
   return wb.xlsx.writeBuffer();
 }
 
+/** Genera buffer .xlsx simplificado — PLU y Cantidad (para departamentos de producción) */
+async function generarExcelPluCantidad(quiebres) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Pedido');
+
+  ws.columns = [
+    { header: 'PLU',      key: 'plu',      width: 15 },
+    { header: 'Cantidad', key: 'cantidad', width: 15 },
+  ];
+
+  // Estilo encabezado — Naranja oscuro profesional para combinar con el de producción
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC2410C' } }; // Orange-700
+    cell.alignment = { horizontal: 'center' };
+  });
+
+  quiebres.forEach((q, i) => {
+    const row = ws.addRow({
+      plu:      q.pro_codigo_plu,
+      cantidad: q.cantidadAProducir,
+    });
+    
+    // Formato de texto y alineación al centro
+    row.getCell('plu').alignment = { horizontal: 'center' };
+    row.getCell('cantidad').alignment = { horizontal: 'center' };
+
+    // Fila intercalada
+    if (i % 2 === 0) {
+      row.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Orange-50 tint
+      });
+    }
+  });
+
+  return wb.xlsx.writeBuffer();
+}
+
 /**
  * Envía correo HTML + adjunto Excel con los quiebres.
  * tipo: 'produccion' | 'reposicion'
@@ -218,18 +256,29 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
   const destinatario = depEmail || process.env.EMAIL_PRODUCCION;
   const tipoLabel = esProduccion ? 'Producción' : 'Reposición';
 
+  const attachments = [{
+    filename:    `${tipo}_${folio}.xlsx`,
+    content:     excelBuffer,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  }];
+
+  if (esProduccion) {
+    const excelPluCantBuffer = await generarExcelPluCantidad(quiebres);
+    attachments.push({
+      filename:    `pedido_produccion_${folio}.xlsx`,
+      content:     excelPluCantBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  }
+
   await transporter.sendMail({
     from:    process.env.EMAIL_FROM,
     to:      destinatario,
     cc:      depEmailsCc || undefined,
     subject: `[${tipoLabel}] ${folio} — ${depNombre} — ${quiebres.length} ítem(s)`,
     html,
-    attachments: [{
-      filename:    `${tipo}_${folio}.xlsx`,
-      content:     excelBuffer,
-      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    }],
+    attachments,
   });
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion };
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad };
