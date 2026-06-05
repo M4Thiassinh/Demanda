@@ -194,8 +194,10 @@ async function finalizarRevision(req, res) {
       };
     });
 
-    // Solo productos que requieren pedido > 0
-    let quiebres = resultados.filter((r) => r.cantidadAProducir > 0);
+    // Para áreas productivas: solo productos que requieren pedido > 0. Para áreas no productivas: incluimos todos los revisados.
+    let quiebres = esProductivo
+      ? resultados.filter((r) => r.cantidadAProducir > 0)
+      : resultados;
 
     // Ordenar alfabéticamente, luego por cantidad de mayor a menor
     quiebres.sort((a, b) => {

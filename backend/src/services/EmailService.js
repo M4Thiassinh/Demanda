@@ -219,6 +219,12 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
     : 'linear-gradient(135deg,#1d4ed8,#3b82f6)';
   const titulo = esProduccion ? '📋 Orden de Producción' : '📦 Reporte de Reposición';
 
+  const totalItems = quiebres.length;
+  const itemsConRequerimiento = quiebres.filter((q) => q.cantidadAProducir > 0).length;
+  const descRequerimiento = esProduccion
+    ? `<b>${totalItems}</b> producto(s) requiere(n) producción`
+    : `<b>${itemsConRequerimiento}</b> de <b>${totalItems}</b> producto(s) requiere(n) reposición`;
+
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
   <tr><td align="center">
@@ -233,7 +239,7 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
         <b>Usuario:</b> ${usuNombre || 'Operador'} &nbsp;|&nbsp; <b>Fecha:</b> ${fecha}
       </p>
       <p style="margin:8px 0 0;font-size:13px;color:#9a3412;">
-        <b>${quiebres.length}</b> producto(s) requiere(n) reposición
+        ${descRequerimiento}
       </p>
     </td></tr>
     <tr><td style="padding:20px 28px;">
