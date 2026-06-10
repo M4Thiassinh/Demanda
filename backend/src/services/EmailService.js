@@ -139,6 +139,7 @@ async function generarExcelPluCantidad(quiebres) {
 
   ws.columns = [
     { header: 'PLU',      key: 'plu',      width: 15 },
+    { header: 'Producto', key: 'nombre',   width: 40 },
     { header: 'Cantidad', key: 'cantidad', width: 15 },
   ];
 
@@ -152,11 +153,13 @@ async function generarExcelPluCantidad(quiebres) {
   quiebres.forEach((q, i) => {
     const row = ws.addRow({
       plu:      q.pro_codigo_plu,
+      nombre:   q.pro_nombre_producto,
       cantidad: q.cantidadAProducir,
     });
     
-    // Formato de texto y alineación al centro
+    // Formato de texto y alineación
     row.getCell('plu').alignment = { horizontal: 'center' };
+    row.getCell('nombre').alignment = { horizontal: 'left' };
     row.getCell('cantidad').alignment = { horizontal: 'center' };
 
     // Fila intercalada

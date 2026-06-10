@@ -402,8 +402,20 @@ export default function MasterAdminPanel() {
                             className="w-full bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none transition-colors"
                           />
                         </td>
-                        <td className="p-3 text-center text-gray-500 font-mono">
-                          {current.ventaDiaria !== undefined ? Number(current.ventaDiaria).toFixed(1) : '-'}
+                        <td className="p-2 w-28 text-center">
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            value={current.ventaDiaria !== undefined ? Number(current.ventaDiaria) : ''} 
+                            onChange={e => {
+                              const val = parseFloat(e.target.value);
+                              const days = current.dias_historial || 30;
+                              handleEdit(localId, 'ventaDiaria', isNaN(val) ? '' : val);
+                              handleEdit(localId, 'vta_total_periodo', isNaN(val) ? 0 : Number((val * days).toFixed(2)));
+                            }}
+                            className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-emerald-300 font-mono"
+                            placeholder="0.0"
+                          />
                         </td>
                         <td className="p-2">
                           <input 
@@ -466,15 +478,67 @@ export default function MasterAdminPanel() {
                 <label className="label">Nombre del Producto</label>
                 <input required type="text" className="input-field" value={newProd.pro_nombre_producto} onChange={e => setNewProd({...newProd, pro_nombre_producto: e.target.value})} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="label">Venta Total</label>
-                  <input type="number" step="0.01" className="input-field" value={newProd.vta_total_periodo} onChange={e => setNewProd({...newProd, vta_total_periodo: e.target.value})} placeholder="0" />
+                  <label className="label text-xs">Venta Diaria Prom.</label>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    className="input-field text-emerald-300 font-semibold" 
+                    value={newProd.ventaDiaria || ''} 
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      const d = parseInt(newProd.dias_historial) || 30;
+                      setNewProd({
+                        ...newProd,
+                        ventaDiaria: e.target.value,
+                        vta_total_periodo: isNaN(v) ? '' : String((v * d).toFixed(2))
+                      });
+                    }} 
+                    placeholder="Ej: 2.1" 
+                  />
                 </div>
                 <div>
-                  <label className="label">Req. Mínimo</label>
-                  <input type="number" className="input-field text-brand-300" value={newProd.pro_cantidad_minima} onChange={e => setNewProd({...newProd, pro_cantidad_minima: e.target.value})} placeholder="0" />
+                  <label className="label text-xs">Venta Total Período</label>
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    className="input-field" 
+                    value={newProd.vta_total_periodo} 
+                    onChange={e => {
+                      const vt = parseFloat(e.target.value);
+                      const d = parseInt(newProd.dias_historial) || 30;
+                      setNewProd({
+                        ...newProd,
+                        vta_total_periodo: e.target.value,
+                        ventaDiaria: isNaN(vt) ? '' : String((vt / d).toFixed(2))
+                      });
+                    }} 
+                    placeholder="0" 
+                  />
                 </div>
+                <div>
+                  <label className="label text-xs">Días Período</label>
+                  <input 
+                    type="number" 
+                    className="input-field" 
+                    value={newProd.dias_historial} 
+                    onChange={e => {
+                      const d = parseInt(e.target.value) || 30;
+                      const vd = parseFloat(newProd.ventaDiaria);
+                      setNewProd({
+                        ...newProd,
+                        dias_historial: e.target.value,
+                        vta_total_periodo: isNaN(vd) ? newProd.vta_total_periodo : String((vd * d).toFixed(2))
+                      });
+                    }} 
+                    placeholder="30" 
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Req. Mínimo de Producción</label>
+                <input type="number" className="input-field text-brand-300" value={newProd.pro_cantidad_minima} onChange={e => setNewProd({...newProd, pro_cantidad_minima: e.target.value})} placeholder="0" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

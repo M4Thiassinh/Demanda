@@ -134,7 +134,7 @@ function CsvTab() {
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
 
-  const setFile = (f) => f?.name.endsWith('.csv') ? (setArchivo(f), setError('')) : setError('Solo .csv')
+  const setFile = (f) => (f?.name.endsWith('.csv') || f?.name.endsWith('.xlsx')) ? (setArchivo(f), setError('')) : setError('Solo archivos .csv o .xlsx')
 
   const cargar = async () => {
     if (!archivo || !depSel) return setError('Selecciona departamento y archivo')
@@ -166,9 +166,9 @@ function CsvTab() {
         onDrop={e => { e.preventDefault(); setDrag(false); setFile(e.dataTransfer.files[0]) }}
         className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all
           ${drag ? 'border-brand-500 bg-brand-900/20' : archivo ? 'border-emerald-600 bg-emerald-900/20' : 'border-gray-600 hover:border-gray-500'}`}>
-        <input id="csv-file" type="file" accept=".csv" className="hidden" onChange={e => setFile(e.target.files[0])} />
+        <input id="csv-file" type="file" accept=".csv,.xlsx" className="hidden" onChange={e => setFile(e.target.files[0])} />
         {archivo ? (<><p className="text-4xl">📄</p><p className="text-emerald-400 font-semibold mt-1">{archivo.name}</p></>)
-          : (<><p className="text-4xl">📁</p><p className="text-gray-300 font-medium mt-1">Arrastra tu CSV</p><p className="text-gray-500 text-sm">Formato: PLU;Nombre;Ventas_Total</p></>)}
+          : (<><p className="text-4xl">📁</p><p className="text-gray-300 font-medium mt-1">Arrastra tu CSV o Excel</p><p className="text-gray-500 text-xs">Soporta .csv y .xlsx (con o sin overrides)</p></>)}
       </div>
       {error && <p className="text-rose-400 text-sm text-center">{error}</p>}
       {resultado && (

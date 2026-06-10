@@ -9,8 +9,10 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ok = file.mimetype === 'text/csv'
       || file.mimetype === 'application/vnd.ms-excel'
-      || file.originalname.toLowerCase().endsWith('.csv');
-    ok ? cb(null, true) : cb(Object.assign(new Error('Solo .csv'), { status: 400 }));
+      || file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      || file.originalname.toLowerCase().endsWith('.csv')
+      || file.originalname.toLowerCase().endsWith('.xlsx');
+    ok ? cb(null, true) : cb(Object.assign(new Error('Solo .csv o .xlsx'), { status: 400 }));
   },
 });
 

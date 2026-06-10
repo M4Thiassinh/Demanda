@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
-import { buscarProductos, agregarDetalle, eliminarDetalle, finalizarRevision, obtenerRevision, calcularItem, agregarDetalleBulk } from '../api'
+import { buscarProductos, agregarDetalle, eliminarDetalle, finalizarRevision, obtenerRevision, calcularItem, agregarDetalleBulk, obtenerNoEscaneados } from '../api'
 import BarcodeScanner from '../components/operator/BarcodeScanner'
 import CalculoModal from '../components/operator/CalculoModal'
 import NoEscaneadosModal from '../components/operator/NoEscaneadosModal'
@@ -145,6 +145,63 @@ export default function RevisionPage() {
   const finalizar = async () => {
     if (!items.length) return setError('Agrega al menos un producto')
 
+    let itemsToFinalize = [...items];
+    const esCarnesNoProductivo = (depNombre?.toLowerCase() === 'carnes' || Number(depId) === 13) && !esProductivo;
+
+    if (esCarnesNoProductivo) {
+      try {
+        const res = await obtenerNoEscaneados(revisionId);
+        const nonScanned = res.filter(p => !items.some(i => i.pro_codigo_plu === p.pro_codigo_plu));
+
+        if (nonScanned.length > 0) {
+          const result = await Swal.fire({
+            title: '<h2 class="text-white text-xl font-bold">Productos sin escanear</h2>',
+            text: `Aún faltan ${nonScanned.length} productos por escanear. ¿Quiere dejarlos en stock 0?`,
+            icon: 'warning',
+            background: '#111827',
+            color: '#ffffff',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, dejarlos en stock 0',
+            cancelButtonText: 'Cancelar y revisar',
+            confirmButtonColor: '#059669',
+            cancelButtonColor: '#4b5563',
+          });
+
+          if (!result.isConfirmed) {
+            return; // Abort finalization to let them review/scan
+          }
+
+          // Build items to add
+          const itemsToAdd = nonScanned.map(p => ({
+            pro_codigo_plu: p.pro_codigo_plu,
+            pro_nombre_producto: p.pro_nombre_producto,
+            cantidad_pedir: Math.max(Number(p.cantidadAProducir || 0), Number(p.pro_cantidad_minima || 0))
+          }));
+
+          await agregarDetalleBulk(revisionId, itemsToAdd);
+
+          // Update local state to sync with backend
+          itemsToAdd.forEach(i => addItem({
+            pro_codigo_plu: i.pro_codigo_plu,
+            det_stock_sala: 0,
+            det_cantidad_pedir: i.cantidad_pedir,
+            pro_nombre_producto: i.pro_nombre_producto ? `${i.pro_nombre_producto} (No escaneado)` : 'Producto (No escaneado)'
+          }));
+
+          itemsToFinalize = [...items, ...itemsToAdd.map(i => ({
+            pro_codigo_plu: i.pro_codigo_plu,
+            det_stock_sala: 0,
+            det_cantidad_pedir: i.cantidad_pedir,
+            pro_nombre_producto: i.pro_nombre_producto ? `${i.pro_nombre_producto} (No escaneado)` : 'Producto (No escaneado)'
+          }))];
+        }
+      } catch (e) {
+        console.error('Error checking non-scanned items', e);
+        setError(e?.response?.data?.error || 'Error al validar productos no escaneados');
+        return;
+      }
+    }
+
     // Fetch the current department info to get default emails
     let defaultEmails = '';
     try {
@@ -184,7 +241,7 @@ export default function RevisionPage() {
       try { 
         // Concatenate default and custom emails
         const finalEmails = [defaultEmails, customEmails].filter(Boolean).join(', ');
-        setModal(await finalizarRevision(revisionId, items, finalEmails)) 
+        setModal(await finalizarRevision(revisionId, itemsToFinalize, finalEmails)) 
       }
       catch (e) { setError(e?.response?.data?.error || 'Error al finalizar') }
       finally { setFin(false) }
