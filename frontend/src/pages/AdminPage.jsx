@@ -126,6 +126,7 @@ function CsvTab() {
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
   const [dias, setDias]          = useState(30)
+  const [mode, setMode]          = useState('normal') // 'normal' | 'update'
   const [archivo, setArchivo]    = useState(null)
   const [loading, setLoading]    = useState(false)
   const [resultado, setRes]      = useState(null)
@@ -141,7 +142,7 @@ function CsvTab() {
     setLoading(true); setRes(null); setError('')
     try {
       const fd = new FormData()
-      fd.append('file', archivo); fd.append('dep_id', depSel); fd.append('dias_historial', dias)
+      fd.append('file', archivo); fd.append('dep_id', depSel); fd.append('dias_historial', dias); fd.append('mode', mode)
       setRes(await subirCSV(fd)); setArchivo(null)
     } catch (e) { setError(e?.response?.data?.error || 'Error') }
     finally { setLoading(false) }
@@ -159,6 +160,13 @@ function CsvTab() {
       <div>
         <label className="label">Días del período</label>
         <input id="csv-dias" type="number" min={1} value={dias} onChange={e => setDias(e.target.value)} className="input-field" />
+      </div>
+      <div>
+        <label className="label">Modo de Carga</label>
+        <select value={mode} onChange={e => setMode(e.target.value)} className="input-field">
+          <option value="normal">Carga Completa (Crear nuevos y actualizar existentes)</option>
+          <option value="update">Solo Actualizar Existentes (Evita agregar descontinuados)</option>
+        </select>
       </div>
       <div onClick={() => document.getElementById('csv-file').click()}
         onDragOver={e => { e.preventDefault(); setDrag(true) }}
@@ -481,7 +489,7 @@ function ExportTab() {
 // ── Página Principal Admin ────────────────────────────────────
 export default function AdminPage() {
   const navigate = useNavigate()
-  const reset    = useAppStore(s => s.reset)
+  const logout   = useAppStore(s => s.logout)
   const [tab, setTab] = useState('config')
   
   // Lógica de Autenticación
@@ -550,7 +558,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-gray-950 max-w-2xl mx-auto">
       <header className="bg-gray-900 border-b border-gray-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
-        <button onClick={() => { reset(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
+        <button onClick={() => { logout(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
         <div><p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
           <h1 className="text-white font-bold">Panel Administrador</h1></div>
         <button onClick={handleLogout} className="ml-auto bg-rose-900/40 hover:bg-rose-800/60 border border-rose-800/50 rounded-full px-4 py-1.5 text-rose-300 text-xs font-semibold transition-colors">

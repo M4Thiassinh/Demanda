@@ -5,7 +5,7 @@ import { getDepartamentos, getUsuarios, iniciarRevision, buscarRevisionActiva } 
 
 export default function RolePage() {
   const navigate = useNavigate()
-  const { setRole, setDepartamento, setUsuario, setRevision, clearRevision, role } = useAppStore()
+  const { setRole, setDepartamento, setUsuario, setRevision, clearRevision, logout, role } = useAppStore()
 
   const [departamentos, setDepartamentos] = useState([])
   const [usuarios, setUsuarios]           = useState([])
@@ -88,7 +88,7 @@ export default function RolePage() {
       {/* Formulario Operador */}
       {role === 'operador' && (
         <div className="relative w-full max-w-sm animate-slide-up">
-          <button onClick={() => setRole(null)} className="text-gray-400 hover:text-white text-sm mb-5 transition-colors flex items-center gap-1">
+          <button onClick={() => { logout(); setDepSel(''); setUsuSel('') }} className="text-gray-400 hover:text-white text-sm mb-5 transition-colors flex items-center gap-1">
             ← Volver
           </button>
           <div className="card p-6 space-y-4">

@@ -1,7 +1,36 @@
 const express  = require('express');
 const multer   = require('multer');
+const crypto   = require('crypto');
 const router   = express.Router();
 const ctrl     = require('../controllers/admin.controller');
+
+// Comparación de tiempo constante (evita timing attacks al comparar contraseñas).
+function tokenValido(recibido, esperado) {
+  if (typeof recibido !== 'string' || typeof esperado !== 'string' || !esperado) return false;
+  const a = Buffer.from(recibido);
+  const b = Buffer.from(esperado);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Rate limiter en memoria para los endpoints de login (mitiga fuerza bruta).
+const intentos = new Map(); // ip -> { count, ts }
+const LIMITE = 10;
+const VENTANA_MS = 15 * 60 * 1000;
+function rateLimitLogin(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'desconocida';
+  const ahora = Date.now();
+  const reg = intentos.get(ip);
+  if (!reg || ahora - reg.ts > VENTANA_MS) {
+    intentos.set(ip, { count: 1, ts: ahora });
+    return next();
+  }
+  reg.count += 1;
+  if (reg.count > LIMITE) {
+    return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos.' });
+  }
+  next();
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -18,38 +47,41 @@ const upload = multer({
 
 const authAdmin = (req, res, next) => {
   if (req.path.startsWith('/master-productos')) return next();
-  const token = req.headers['x-admin-password'];
-  if (!process.env.ADMIN_PASSWORD) return next();
-  if (token === process.env.ADMIN_PASSWORD) {
+  // Fail-closed: si no hay contraseña configurada, NO se abre el acceso.
+  if (!process.env.ADMIN_PASSWORD) {
+    return res.status(500).json({ error: 'Servidor mal configurado (falta ADMIN_PASSWORD)' });
+  }
+  if (tokenValido(req.headers['x-admin-password'], process.env.ADMIN_PASSWORD)) {
     return next();
   }
   return res.status(401).json({ error: 'No autorizado' });
 };
 
 const authMaster = (req, res, next) => {
-  const token = req.headers['x-master-password'];
-  if (!process.env.MASTER_PASSWORD) return next(); // Fallback si no está configurado
-  if (token === process.env.MASTER_PASSWORD) {
+  if (!process.env.MASTER_PASSWORD) {
+    return res.status(500).json({ error: 'Servidor mal configurado (falta MASTER_PASSWORD)' });
+  }
+  if (tokenValido(req.headers['x-master-password'], process.env.MASTER_PASSWORD)) {
     return next();
   }
   return res.status(401).json({ error: 'No autorizado maestro' });
 };
 
-router.post('/admin/login', (req, res) => {
+router.post('/admin/login', rateLimitLogin, (req, res) => {
   const { password } = req.body;
-  if (password === process.env.ADMIN_PASSWORD) {
+  if (process.env.ADMIN_PASSWORD && tokenValido(password, process.env.ADMIN_PASSWORD)) {
     res.json({ ok: true, token: password });
   } else {
     res.status(401).json({ error: 'Contraseña incorrecta' });
   }
 });
 
-router.post('/admin/login-master', (req, res) => {
-  const { password } = req.body;
+router.post('/admin/login-master', rateLimitLogin, (req, res) => {
   if (!process.env.MASTER_PASSWORD) {
-    return res.json({ ok: true, token: 'no-password-required' });
+    return res.status(500).json({ error: 'Servidor mal configurado (falta MASTER_PASSWORD)' });
   }
-  if (password === process.env.MASTER_PASSWORD) {
+  const { password } = req.body;
+  if (tokenValido(password, process.env.MASTER_PASSWORD)) {
     res.json({ ok: true, token: password });
   } else {
     res.status(401).json({ error: 'Contraseña maestra incorrecta' });

@@ -66,9 +66,10 @@ async function actualizarConfig(req, res) {
 async function subirCSV(req, res) {
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
-    const { dep_id, dias_historial } = req.body;
+    const { dep_id, dias_historial, mode } = req.body;
     if (!dep_id || !dias_historial) return res.status(400).json({ error: 'dep_id y dias_historial requeridos' });
-    const resultado = await CsvImport.importarCSV(req.file.buffer, dep_id, parseInt(dias_historial, 10));
+    const onlyUpdateExisting = (mode === 'update');
+    const resultado = await CsvImport.importarCSV(req.file.buffer, dep_id, parseInt(dias_historial, 10), onlyUpdateExisting);
     res.json({ ok: true, ...resultado });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -304,14 +305,13 @@ async function actualizarMasterProductosBulk(req, res) {
     }
 
     await connection.commit();
-    connection.release();
     res.json({ ok: true, actualizados: productos.length });
   } catch (err) {
-    if (connection) {
-      await connection.rollback();
-      connection.release();
-    }
-    res.status(500).json({ error: err.message });
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('[actualizarMasterProductosBulk]', err.message);
+    res.status(500).json({ error: 'No se pudieron guardar los productos' });
+  } finally {
+    if (connection) connection.release();
   }
 }
 
@@ -331,14 +331,13 @@ async function eliminarMasterProductosBulk(req, res) {
     await connection.query(query, [dep_id, ...plus]);
 
     await connection.commit();
-    connection.release();
     res.json({ ok: true, eliminados: plus.length });
   } catch (err) {
-    if (connection) {
-      await connection.rollback();
-      connection.release();
-    }
-    res.status(500).json({ error: err.message });
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('[eliminarMasterProductosBulk]', err.message);
+    res.status(500).json({ error: 'No se pudieron eliminar los productos' });
+  } finally {
+    if (connection) connection.release();
   }
 }
 

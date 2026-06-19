@@ -5,7 +5,7 @@ const db = require('../config/db');
 /**
  * Parsea un buffer (CSV o Excel) y hace UPSERT en la tabla productos (MySQL).
  */
-async function importarCSV(fileBuffer, depId, diasHistorial) {
+async function importarCSV(fileBuffer, depId, diasHistorial, onlyUpdateExisting = false) {
   // Detectar si el buffer es un archivo Excel (.xlsx) verificando los bytes 'PK'
   const isExcel = fileBuffer.length > 2 && fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B;
 
@@ -71,6 +71,11 @@ async function importarCSV(fileBuffer, depId, diasHistorial) {
   let actualizados = 0;
   const errores    = [];
 
+  // Toda la importación corre dentro de una transacción y una sola conexión,
+  // garantizando liberación de la conexión (finally) y atomicidad ante fallos graves.
+  const connection = await db.pool.getConnection();
+  await connection.beginTransaction();
+
   const cleanInt = (val) => {
     if (val === null || val === undefined || String(val).trim() === '') return null;
     const num = parseInt(String(val).replace(/[^0-9-]/g, ''), 10);
@@ -91,6 +96,7 @@ async function importarCSV(fileBuffer, depId, diasHistorial) {
   };
 
   // Iterar y guardar
+  try {
   for (let i = startIdx; i < registros.length; i++) {
     const fila = registros[i];
     try {
@@ -119,54 +125,97 @@ async function importarCSV(fileBuffer, depId, diasHistorial) {
       const tieneOverrideCols = mapping.diasProdIdx !== -1 || mapping.diasSegIdx !== -1 || mapping.minReqIdx !== -1;
 
       let result;
-      if (tieneOverrideCols) {
-        const diasProdOverride = mapping.diasProdIdx !== -1 ? cleanInt(fila[mapping.diasProdIdx]) : null;
-        const diasSegOverride = mapping.diasSegIdx !== -1 ? cleanInt(fila[mapping.diasSegIdx]) : null;
-        const minReqOverride = mapping.minReqIdx !== -1 ? cleanInt(fila[mapping.minReqIdx]) : null;
+      if (onlyUpdateExisting) {
+        if (tieneOverrideCols) {
+          const diasProdOverride = mapping.diasProdIdx !== -1 ? cleanInt(fila[mapping.diasProdIdx]) : null;
+          const diasSegOverride = mapping.diasSegIdx !== -1 ? cleanInt(fila[mapping.diasSegIdx]) : null;
+          const minReqOverride = mapping.minReqIdx !== -1 ? cleanInt(fila[mapping.minReqIdx]) : null;
 
-        const { rows } = await db.query(
-          `INSERT INTO productos
-             (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id,
-              pro_dias_produccion_override, pro_dias_seguridad_override, pro_cantidad_minima)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-             pro_codigo_barra             = COALESCE(VALUES(pro_codigo_barra), pro_codigo_barra),
-             pro_nombre_producto          = VALUES(pro_nombre_producto),
-             vta_total_periodo            = VALUES(vta_total_periodo),
-             dias_historial               = VALUES(dias_historial),
-             dep_id                       = VALUES(dep_id),
-             pro_dias_produccion_override = VALUES(pro_dias_produccion_override),
-             pro_dias_seguridad_override  = VALUES(pro_dias_seguridad_override),
-             pro_cantidad_minima          = VALUES(pro_cantidad_minima)`,
-          [plu, barra || null, nombre, ventas, dias, depId, diasProdOverride, diasSegOverride, minReqOverride]
-        );
-        result = rows;
+          const [rows] = await connection.query(
+            `UPDATE productos
+             SET pro_codigo_barra             = COALESCE(?, pro_codigo_barra),
+                 pro_nombre_producto          = ?,
+                 vta_total_periodo            = ?,
+                 dias_historial               = ?,
+                 pro_dias_produccion_override = ?,
+                 pro_dias_seguridad_override  = ?,
+                 pro_cantidad_minima          = ?
+             WHERE pro_codigo_plu = ? AND dep_id = ?`,
+            [barra || null, nombre, ventas, dias, diasProdOverride, diasSegOverride, minReqOverride, plu, depId]
+          );
+          result = rows;
+        } else {
+          const [rows] = await connection.query(
+            `UPDATE productos
+             SET pro_codigo_barra    = COALESCE(?, pro_codigo_barra),
+                 pro_nombre_producto = ?,
+                 vta_total_periodo   = ?,
+                 dias_historial      = ?
+             WHERE pro_codigo_plu = ? AND dep_id = ?`,
+            [barra || null, nombre, ventas, dias, plu, depId]
+          );
+          result = rows;
+        }
+        if (result.affectedRows > 0) {
+          actualizados++;
+        }
       } else {
-        // Formato clásico: solo actualiza ventas, y deja intactos los overrides que ya están en la base de datos
-        const { rows } = await db.query(
-          `INSERT INTO productos
-             (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-             pro_codigo_barra    = COALESCE(VALUES(pro_codigo_barra), pro_codigo_barra),
-             pro_nombre_producto = VALUES(pro_nombre_producto),
-             vta_total_periodo   = VALUES(vta_total_periodo),
-             dias_historial      = VALUES(dias_historial),
-             dep_id              = VALUES(dep_id)`,
-          [plu, barra || null, nombre, ventas, dias, depId]
-        );
-        result = rows;
-      }
+        if (tieneOverrideCols) {
+          const diasProdOverride = mapping.diasProdIdx !== -1 ? cleanInt(fila[mapping.diasProdIdx]) : null;
+          const diasSegOverride = mapping.diasSegIdx !== -1 ? cleanInt(fila[mapping.diasSegIdx]) : null;
+          const minReqOverride = mapping.minReqIdx !== -1 ? cleanInt(fila[mapping.minReqIdx]) : null;
 
-      if (result.affectedRows === 1)      insertados++;
-      else if (result.affectedRows === 2) actualizados++;
+          const [rows] = await connection.query(
+            `INSERT INTO productos
+               (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id,
+                pro_dias_produccion_override, pro_dias_seguridad_override, pro_cantidad_minima)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               pro_codigo_barra             = COALESCE(VALUES(pro_codigo_barra), pro_codigo_barra),
+               pro_nombre_producto          = VALUES(pro_nombre_producto),
+               vta_total_periodo            = VALUES(vta_total_periodo),
+               dias_historial               = VALUES(dias_historial),
+               dep_id                       = VALUES(dep_id),
+               pro_dias_produccion_override = VALUES(pro_dias_produccion_override),
+               pro_dias_seguridad_override  = VALUES(pro_dias_seguridad_override),
+               pro_cantidad_minima          = VALUES(pro_cantidad_minima)`,
+            [plu, barra || null, nombre, ventas, dias, depId, diasProdOverride, diasSegOverride, minReqOverride]
+          );
+          result = rows;
+        } else {
+          // Formato clásico: solo actualiza ventas, y deja intactos los overrides que ya están en la base de datos
+          const [rows] = await connection.query(
+            `INSERT INTO productos
+               (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               pro_codigo_barra    = COALESCE(VALUES(pro_codigo_barra), pro_codigo_barra),
+               pro_nombre_producto = VALUES(pro_nombre_producto),
+               vta_total_periodo   = VALUES(vta_total_periodo),
+               dias_historial      = VALUES(dias_historial),
+               dep_id              = VALUES(dep_id)`,
+            [plu, barra || null, nombre, ventas, dias, depId]
+          );
+          result = rows;
+        }
+
+        if (result.affectedRows === 1)      insertados++;
+        else if (result.affectedRows === 2) actualizados++;
+      }
 
     } catch (err) {
       errores.push(`Error en fila ${i + 1} (${JSON.stringify(fila)}): ${err.message}`);
     }
   }
 
-  return { insertados, actualizados, errores };
+    await connection.commit();
+    return { insertados, actualizados, errores };
+  } catch (err) {
+    try { await connection.rollback(); } catch (_) {}
+    throw err;
+  } finally {
+    connection.release();
+  }
 }
 
 /**
@@ -249,26 +298,33 @@ function detectarColumnas(firstRow) {
       .trim();
   };
 
+  // El orden importa: reglas más específicas primero. En particular, "ventas" se evalúa
+  // ANTES que "días/periodo" para que una cabecera como "Vta total periodo" no se mapee
+  // erróneamente como columna de días. Cada índice solo se asigna una vez.
+  const set = (key, idx) => { if (mapping[key] === -1) mapping[key] = idx; };
+
   firstRow.forEach((cell, idx) => {
     const norm = normalizar(cell);
+    if (!norm) return;
+
     if (norm === 'plu' || norm === 'codplu' || norm === 'codigoplu') {
-      mapping.pluIdx = idx;
-    } else if (norm.includes('desc') || norm === 'nombre' || norm === 'producto') {
-      mapping.nombreIdx = idx;
+      set('pluIdx', idx);
     } else if (norm.includes('barra') || norm.includes('codbarra') || norm === 'ean') {
-      mapping.barraIdx = idx;
-    } else if (norm === 'dias' || norm === 'dia' || norm.includes('historial') || norm.includes('periodo')) {
-      mapping.diasIdx = idx;
-    } else if (norm.includes('cant') || norm.includes('vta') || norm.includes('venta') || norm === 'total') {
-      mapping.cantIdx = idx;
-    } else if (norm.includes('prod') || norm.includes('produccion')) {
-      mapping.diasProdIdx = idx;
-    } else if (norm.includes('seg') || norm.includes('seguridad')) {
-      mapping.diasSegIdx = idx;
-    } else if (norm.includes('min') || norm.includes('req') || norm.includes('requerimiento')) {
-      mapping.minReqIdx = idx;
+      set('barraIdx', idx);
+    } else if (norm.includes('desc') || norm === 'nombre' || norm === 'producto') {
+      set('nombreIdx', idx);
     } else if (norm.includes('prom') || norm.includes('porm') || norm.includes('promedio')) {
-      mapping.promDiaIdx = idx;
+      set('promDiaIdx', idx);
+    } else if (norm.includes('cant') || norm.includes('vta') || norm.includes('venta') || norm === 'total') {
+      set('cantIdx', idx);
+    } else if (norm.includes('prod') || norm.includes('produccion')) {
+      set('diasProdIdx', idx);
+    } else if (norm.includes('seg') || norm.includes('seguridad')) {
+      set('diasSegIdx', idx);
+    } else if (norm.includes('min') || norm.includes('req') || norm.includes('requerimiento')) {
+      set('minReqIdx', idx);
+    } else if (norm === 'dias' || norm === 'dia' || norm.includes('historial') || norm.includes('periodo')) {
+      set('diasIdx', idx);
     }
   });
 

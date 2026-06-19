@@ -5,6 +5,21 @@ const { enviarOrdenProduccion } = require('../services/EmailService');
 
 const AREAS_PRODUCTIVAS = [22, 1347, 2347];
 
+// Valida una lista de correos separados por coma. Devuelve { ok, lista, invalido }.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function validarEmails(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return { ok: true, lista: [] }; // vacío = usar los del departamento
+  }
+  const lista = String(raw)
+    .split(/[,;]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const invalido = lista.find((e) => !EMAIL_RE.test(e));
+  if (invalido) return { ok: false, invalido };
+  return { ok: true, lista };
+}
+
 function generarFolio(depId) {
   const now   = new Date();
   const fecha = now.toISOString().slice(0, 10).replace(/-/g, '');
@@ -62,21 +77,34 @@ async function agregarDetalle(req, res) {
 
 // POST /api/revision/:revId/detalle/bulk
 async function agregarDetalleBulk(req, res) {
+  const { revId } = req.params;
+  const { items } = req.body; // Array de { pro_codigo_plu, cantidad_pedir }
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'items requeridos' });
+
+  let connection;
   try {
-    const { revId } = req.params;
-    const { items } = req.body; // Array de { pro_codigo_plu, cantidad_pedir }
-    if (!items || !items.length) return res.status(400).json({ error: 'items requeridos' });
+    connection = await db.pool.getConnection();
+    await connection.beginTransaction();
 
     for (const item of items) {
-      await db.query(
+      const cant = parseInt(item.cantidad_pedir, 10);
+      await connection.query(
         `INSERT INTO detalle_revision (rev_id, pro_codigo_plu, det_stock_sala, det_cantidad_pedir)
          VALUES (?, ?, 0, ?)
          ON DUPLICATE KEY UPDATE det_cantidad_pedir = VALUES(det_cantidad_pedir)`,
-        [revId, item.pro_codigo_plu, parseInt(item.cantidad_pedir, 10)]
+        [revId, item.pro_codigo_plu, Number.isFinite(cant) ? cant : 0]
       );
     }
-    res.status(201).json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+
+    await connection.commit();
+    res.status(201).json({ ok: true, total: items.length });
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('[agregarDetalleBulk]', err.message);
+    res.status(500).json({ error: 'No se pudieron guardar los ítems' });
+  } finally {
+    if (connection) connection.release();
+  }
 }
 
 // POST /api/revision/:revId/calcular-item
@@ -147,6 +175,13 @@ async function finalizarRevision(req, res) {
     const { items, emails_to } = req.body;
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Revisión vacía' });
 
+    // Validar correos provistos por el cliente (previene relay a destinos malformados)
+    const emailCheck = validarEmails(emails_to);
+    if (!emailCheck.ok) {
+      return res.status(400).json({ error: `Correo inválido: ${emailCheck.invalido}` });
+    }
+    const emailsToLimpio = emailCheck.lista.length ? emailCheck.lista.join(', ') : null;
+
     const revRes = await db.query(
       `SELECT r.rev_id, r.rev_folio, r.dep_id, r.rev_fecha,
               d.dep_nombre, d.dep_email_jefe, d.dep_emails_cc, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
@@ -208,23 +243,43 @@ async function finalizarRevision(req, res) {
       return b.cantidadAProducir - a.cantidadAProducir;
     });
 
-    await db.query(`UPDATE revisiones SET rev_estado = 'completada' WHERE rev_id = ?`, [revId]);
+    // Reclamar la revisión de forma atómica: solo una finalización puede tener éxito.
+    // Si ya estaba 'completada', evitamos reenviar correos duplicados.
+    const claim = await db.query(
+      `UPDATE revisiones SET rev_estado = 'completada' WHERE rev_id = ? AND rev_estado = 'en_proceso'`,
+      [revId]
+    );
+    if (!claim.rows.affectedRows) {
+      return res.status(409).json({ error: 'La revisión ya fue finalizada anteriormente' });
+    }
 
+    // Enviar el correo DESPUÉS de reclamar pero revirtiendo el estado si falla,
+    // para no perder el pedido cuando el SMTP no responde.
     if (quiebres.length > 0) {
-      await enviarOrdenProduccion({
-        depNombre: rev.dep_nombre,
-        depEmail:  emails_to || rev.dep_email_jefe,
-        depEmailsCc: emails_to ? null : rev.dep_emails_cc,
-        revFecha:  rev.rev_fecha,
-        folio:     rev.rev_folio,
-        usuNombre: rev.usu_nombre,
-        quiebres,
-        tipo: esProductivo ? 'produccion' : 'reposicion',
-      });
+      try {
+        await enviarOrdenProduccion({
+          depNombre: rev.dep_nombre,
+          depEmail:  emailsToLimpio || rev.dep_email_jefe,
+          depEmailsCc: emailsToLimpio ? null : rev.dep_emails_cc,
+          revFecha:  rev.rev_fecha,
+          folio:     rev.rev_folio,
+          usuNombre: rev.usu_nombre,
+          quiebres,
+          tipo: esProductivo ? 'produccion' : 'reposicion',
+        });
+      } catch (mailErr) {
+        // Reabrir la revisión para que el operador pueda reintentar el envío.
+        await db.query(`UPDATE revisiones SET rev_estado = 'en_proceso' WHERE rev_id = ?`, [revId]);
+        console.error('[finalizarRevision] Fallo SMTP:', mailErr.message);
+        return res.status(502).json({ error: 'No se pudo enviar el correo. La revisión sigue abierta; intenta nuevamente.' });
+      }
     }
 
     res.json({ ok: true, folio: rev.rev_folio, totalItems: resultados.length, quiebres: quiebres.length, correoEnviado: quiebres.length > 0, detalle: resultados });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[finalizarRevision]', err.message);
+    res.status(500).json({ error: 'Error al finalizar la revisión' });
+  }
 }
 
 // GET /api/revision/:revId

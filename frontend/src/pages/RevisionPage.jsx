@@ -146,9 +146,9 @@ export default function RevisionPage() {
     if (!items.length) return setError('Agrega al menos un producto')
 
     let itemsToFinalize = [...items];
-    const esCarnesNoProductivo = (depNombre?.toLowerCase() === 'carnes' || Number(depId) === 13) && !esProductivo;
+    const esNoProductivo = !esProductivo;
 
-    if (esCarnesNoProductivo) {
+    if (esNoProductivo) {
       try {
         const res = await obtenerNoEscaneados(revisionId);
         const nonScanned = res.filter(p => !items.some(i => i.pro_codigo_plu === p.pro_codigo_plu));

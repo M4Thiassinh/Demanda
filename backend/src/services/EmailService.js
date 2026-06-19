@@ -9,8 +9,17 @@ const transporter = nodemailer.createTransport({
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   connectionTimeout: 10000,  // 10 segundos max para conectar
   greetingTimeout:   5000,
-  tls: { rejectUnauthorized: false },
+  // Por defecto se valida el certificado TLS del servidor SMTP (evita MITM).
+  // Solo se desactiva si se define explícitamente SMTP_TLS_REJECT_UNAUTHORIZED=false.
+  tls: { rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false' },
 });
+
+/** Escapa texto para insertarlo de forma segura en el HTML del correo. */
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
 
 /** Genera buffer .xlsx — Orden de Producción (Áreas Productivas) */
 async function generarExcel(quiebres, depNombre, folio, fecha) {
@@ -187,18 +196,18 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
 
   const filasProduccion = quiebres.map((q) => `
     <tr>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#ea580c;font-size:17px;">${q.cantidadAProducir}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${esc(q.pro_codigo_plu)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${esc(q.pro_nombre_producto)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#ea580c;font-size:17px;">${esc(q.cantidadAProducir)}</td>
     </tr>`).join('');
 
   const filasReposicion = quiebres.map((q) => `
     <tr>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${q.pro_codigo_plu}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${q.pro_nombre_producto}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${esc(q.pro_codigo_plu)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${esc(q.pro_nombre_producto)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${Math.round(q.demandaTotalRequerida || 0)}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${q.det_stock_sala ?? 0}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#1d4ed8;font-size:17px;">${q.cantidadAProducir}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">${esc(q.det_stock_sala ?? 0)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#1d4ed8;font-size:17px;">${esc(q.cantidadAProducir)}</td>
     </tr>`).join('');
 
   const filas = esProduccion ? filasProduccion : filasReposicion;
@@ -238,8 +247,8 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
     </td></tr>
     <tr><td style="padding:18px 28px;background:#fff7ed;border-bottom:1px solid #fed7aa;">
       <p style="margin:0;font-size:13px;color:#7c2d12;">
-        <b>Folio:</b> ${folio} &nbsp;|&nbsp; <b>Depto:</b> ${depNombre} &nbsp;|&nbsp;
-        <b>Usuario:</b> ${usuNombre || 'Operador'} &nbsp;|&nbsp; <b>Fecha:</b> ${fecha}
+        <b>Folio:</b> ${esc(folio)} &nbsp;|&nbsp; <b>Depto:</b> ${esc(depNombre)} &nbsp;|&nbsp;
+        <b>Usuario:</b> ${esc(usuNombre || 'Operador')} &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fecha)}
       </p>
       <p style="margin:8px 0 0;font-size:13px;color:#9a3412;">
         ${descRequerimiento}

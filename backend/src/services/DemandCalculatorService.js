@@ -15,51 +15,103 @@
  *   requerimiento_a_producir = demanda_total_requerida - det_stock_sala
  *   → Si <= 0: no se produce. Si > 0: Math.ceil()
  */
+
+const r4 = (n) => Math.round(n * 10000) / 10000;
+
+// Convierte cualquier entrada a un número finito; si no se puede, devuelve `def`.
+const toFiniteNumber = (v, def = 0) => {
+  if (v === null || v === undefined || v === '') return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+// Resultado neutro cuando no es posible calcular (sin historial, datos corruptos, etc.)
+function resultadoVacio(min = 0) {
+  return {
+    ventaDiaria:              0,
+    diasProdEfectivo:         0,
+    diasSegEfectivo:          0,
+    loteProduccionBase:       0,
+    stockSeguridadCalculado:  0,
+    demandaTotalRequerida:    0,
+    requerimiento:            0,
+    hayQuiebre:               false,
+    cantidadAProducir:        0,
+    pedidoMinimo:             min,
+  };
+}
+
+/**
+ * Calcula el día de la semana (1=Lunes … 7=Domingo) en la zona horaria de Santiago,
+ * independientemente de la zona horaria en la que corra el servidor (UTC, etc.).
+ */
+function diaSemanaSantiago(fechaBase) {
+  const corto = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago',
+    weekday: 'short',
+  }).format(fechaBase);
+  const map = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  return map[corto] || null;
+}
+
 function calcularDemanda(config, producto, stockSala, revFecha) {
-  const { dias_produccion_semana } = config;
   const {
-    vta_total_periodo,
-    dias_historial,
     pro_dias_produccion_override,
     pro_dias_seguridad_override,
     pro_dias_elaboracion,
-    pro_cantidad_minima
+    pro_cantidad_minima,
   } = producto;
 
-  // ── Paso A ────────────────────────────────────────────────
-  const ventaDiaria = vta_total_periodo / dias_historial;
+  const min = Math.max(0, Math.trunc(toFiniteNumber(pro_cantidad_minima, 0)));
 
-  // ── Paso B ────────────────────────────────────────────────
-  const diasProdEfectivo = (pro_dias_produccion_override !== null && pro_dias_produccion_override !== undefined)
+  // ── Paso A — Venta diaria (protección contra división por cero / valores no numéricos) ──
+  const ventas = toFiniteNumber(producto.vta_total_periodo, 0);
+  const dias   = toFiniteNumber(producto.dias_historial, 0);
+  if (dias <= 0) {
+    // Sin historial válido no se puede estimar la demanda: se devuelve resultado neutro.
+    return resultadoVacio(min);
+  }
+  const ventaDiaria = ventas / dias;
+
+  // ── Paso B — Parámetros efectivos (override > automático), nunca cero ni inválido ──
+  let diasProdEfectivo = (pro_dias_produccion_override !== null && pro_dias_produccion_override !== undefined && pro_dias_produccion_override !== '')
     ? parseInt(pro_dias_produccion_override, 10)
-    : dias_produccion_semana;
+    : toFiniteNumber(config && config.dias_produccion_semana, 6);
+  if (!Number.isFinite(diasProdEfectivo) || diasProdEfectivo <= 0) {
+    // Un override de 0 o basura provocaría división por cero → caemos al default seguro.
+    diasProdEfectivo = toFiniteNumber(config && config.dias_produccion_semana, 6) || 6;
+  }
 
-  const diasSegEfectivo = (pro_dias_seguridad_override !== null && pro_dias_seguridad_override !== undefined)
+  let diasSegEfectivo = (pro_dias_seguridad_override !== null && pro_dias_seguridad_override !== undefined && pro_dias_seguridad_override !== '')
     ? parseInt(pro_dias_seguridad_override, 10)
     : (ventaDiaria > 20 ? 1 : 2);
+  if (!Number.isFinite(diasSegEfectivo) || diasSegEfectivo < 0) {
+    diasSegEfectivo = (ventaDiaria > 20 ? 1 : 2);
+  }
 
-  // ── Paso C ────────────────────────────────────────────────
+  // ── Paso C — Ecuación final ──
   const loteProduccionBase      = (ventaDiaria * 7) / diasProdEfectivo;
   const stockSeguridadCalculado = ventaDiaria * diasSegEfectivo;
   const demandaTotalRequerida   = loteProduccionBase + stockSeguridadCalculado;
-  const requerimientoRaw        = demandaTotalRequerida - stockSala;
+  const stock                   = toFiniteNumber(stockSala, 0);
+  const requerimientoRaw        = demandaTotalRequerida - stock;
 
   let hayQuiebre        = requerimientoRaw > 0;
   let cantidadAProducir = hayQuiebre ? Math.ceil(requerimientoRaw) : 0;
 
-  // ── Cantidad Mínima ───────────────────────────────────────
-  const min = parseInt(pro_cantidad_minima || 0, 10);
-
-  // ── Días de Elaboración ───────────────────────────────────
+  // ── Días de Elaboración (zona horaria Santiago, no la del servidor) ──
   if (hayQuiebre && pro_dias_elaboracion) {
     const fechaBase = revFecha ? new Date(revFecha) : new Date();
-    const diaJS = fechaBase.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
-    const diaFormato = diaJS === 0 ? 7 : diaJS; // Convertimos a 1=Lunes, ..., 7=Domingo
-    
-    const diasPermitidos = pro_dias_elaboracion.split(',').map(d => parseInt(d.trim(), 10));
-    if (!diasPermitidos.includes(diaFormato)) {
-      cantidadAProducir = 0;
-      hayQuiebre = false;
+    if (!isNaN(fechaBase.getTime())) {
+      const diaFormato = diaSemanaSantiago(fechaBase);
+      const diasPermitidos = String(pro_dias_elaboracion)
+        .split(',')
+        .map((d) => parseInt(d.trim(), 10))
+        .filter((d) => Number.isFinite(d));
+      if (diaFormato && diasPermitidos.length && !diasPermitidos.includes(diaFormato)) {
+        cantidadAProducir = 0;
+        hayQuiebre = false;
+      }
     }
   }
 
@@ -76,7 +128,5 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
     pedidoMinimo:             min,
   };
 }
-
-const r4 = (n) => Math.round(n * 10000) / 10000;
 
 module.exports = { calcularDemanda };
