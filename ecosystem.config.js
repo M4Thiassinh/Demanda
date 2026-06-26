@@ -1,9 +1,11 @@
+const path = require('path');
+
 module.exports = {
   apps: [
     {
       name:    'teja-market',
       script:  'src/app.js',
-      cwd:     'C:\\Users\\matyr\\Desktop\\Demanda\\backend',
+      cwd:     path.join(__dirname, 'backend'),
       watch:   false,
       env: {
         NODE_ENV: 'production',
