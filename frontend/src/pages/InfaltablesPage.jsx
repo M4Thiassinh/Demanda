@@ -20,7 +20,8 @@ export default function InfaltablesPage() {
 
   useEffect(() => {
     getUsuarios().then(setUsuarios).catch(() => {})
-    getDepartamentos().then(setDepartamentos).catch(() => {})
+    // Solo departamentos marcados como infaltables (dep_infaltable = 1)
+    getDepartamentos({ infaltable: true }).then(setDepartamentos).catch(() => {})
   }, [])
 
   const listo = usuSel && depSel

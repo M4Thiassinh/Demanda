@@ -8,10 +8,14 @@ const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalcul
 async function listarDepartamentos(req, res) {
   try {
     const soloProductivas = req.query.productiva === '1' || req.query.productiva === 'true';
+    const soloInfaltables = req.query.infaltable === '1' || req.query.infaltable === 'true';
+    const filtros = [];
+    if (soloProductivas) filtros.push('dep_productiva = 1');
+    if (soloInfaltables) filtros.push('dep_infaltable = 1');
     const { rows } = await db.query(
-      `SELECT dep_id, dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva
+      `SELECT dep_id, dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva, dep_infaltable
          FROM departamentos
-        ${soloProductivas ? 'WHERE dep_productiva = 1' : ''}
+        ${filtros.length ? `WHERE ${filtros.join(' AND ')}` : ''}
         ORDER BY dep_nombre`
     );
     res.json(rows);

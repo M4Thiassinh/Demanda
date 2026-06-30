@@ -32,7 +32,13 @@ api.interceptors.request.use((config) => {
 export const loginAdmin = (password) => api.post('/admin/login', { password }).then(r => r.data)
 export const loginMaster = (password) => api.post('/admin/login-master', { password }).then(r => r.data)
 
-export const getDepartamentos = (productiva) => api.get('/departamentos', { params: productiva ? { productiva: 1 } : {} }).then(r => r.data)
+// opts: true | { productiva, infaltable }  → filtra por área productiva y/o infaltable
+export const getDepartamentos = (opts) => {
+  const params = {}
+  if (opts === true || opts?.productiva) params.productiva = 1
+  if (opts?.infaltable) params.infaltable = 1
+  return api.get('/departamentos', { params }).then(r => r.data)
+}
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
 export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
