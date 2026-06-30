@@ -2,12 +2,18 @@ const db            = require('../config/db');
 const ConfigService  = require('../services/ConfigService');
 const CsvImport      = require('../services/CsvImportService');
 const { generarExcel } = require('../services/EmailService');
-const { calcularDemanda } = require('../services/DemandCalculatorService');
+const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalculatorService');
 
-// GET /api/departamentos
+// GET /api/departamentos[?productiva=1]
 async function listarDepartamentos(req, res) {
   try {
-    const { rows } = await db.query('SELECT dep_id, dep_nombre, dep_email_jefe, dep_emails_cc FROM departamentos ORDER BY dep_nombre');
+    const soloProductivas = req.query.productiva === '1' || req.query.productiva === 'true';
+    const { rows } = await db.query(
+      `SELECT dep_id, dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva
+         FROM departamentos
+        ${soloProductivas ? 'WHERE dep_productiva = 1' : ''}
+        ORDER BY dep_nombre`
+    );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -15,11 +21,11 @@ async function listarDepartamentos(req, res) {
 // POST /api/departamentos
 async function crearDepartamento(req, res) {
   try {
-    const { dep_id, dep_nombre, dep_email_jefe, dep_emails_cc } = req.body;
+    const { dep_id, dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva } = req.body;
     if (!dep_id || !dep_nombre) return res.status(400).json({ error: 'Faltan datos obligatorios' });
     await db.query(
-      `INSERT INTO departamentos (dep_id, dep_nombre, dep_email_jefe, dep_emails_cc) VALUES (?, ?, ?, ?)`,
-      [dep_id, dep_nombre, dep_email_jefe || null, dep_emails_cc || null]
+      `INSERT INTO departamentos (dep_id, dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva) VALUES (?, ?, ?, ?, ?)`,
+      [dep_id, dep_nombre, dep_email_jefe || null, dep_emails_cc || null, dep_productiva ? 1 : 0]
     );
     // Configuración por defecto para el nuevo departamento
     await db.query(
@@ -33,10 +39,17 @@ async function crearDepartamento(req, res) {
 // PUT /api/departamentos/:depId
 async function actualizarDepartamento(req, res) {
   try {
-    const { dep_nombre, dep_email_jefe, dep_emails_cc } = req.body;
+    const { dep_nombre, dep_email_jefe, dep_emails_cc, dep_productiva } = req.body;
+    // dep_productiva es opcional: si no viene en el body, se conserva el valor actual.
     await db.query(
-      `UPDATE departamentos SET dep_nombre = COALESCE(?, dep_nombre), dep_email_jefe = ?, dep_emails_cc = ? WHERE dep_id = ?`,
-      [dep_nombre, dep_email_jefe || null, dep_emails_cc || null, req.params.depId]
+      `UPDATE departamentos
+          SET dep_nombre     = COALESCE(?, dep_nombre),
+              dep_email_jefe = ?,
+              dep_emails_cc  = ?,
+              dep_productiva = COALESCE(?, dep_productiva)
+        WHERE dep_id = ?`,
+      [dep_nombre, dep_email_jefe || null, dep_emails_cc || null,
+       dep_productiva === undefined ? null : (dep_productiva ? 1 : 0), req.params.depId]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -74,12 +87,19 @@ async function subirCSV(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// GET /api/productos?dep_id=22&q=kuchen
+// GET /api/productos?dep_id=22&q=kuchen[&categoria=normal|especial]
 async function buscarProductos(req, res) {
   try {
     const { dep_id, q = '' } = req.query;
     if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
+    const categoria = (req.query.categoria === 'normal' || req.query.categoria === 'especial') ? req.query.categoria : null;
     const b = `%${q}%`;
+    const params = [dep_id, b, b, b];
+    if (categoria) params.push(categoria);
+    // Filtro por día de elaboración: solo aparece si hoy (zona Santiago) es uno de sus
+    // días, o si no tiene días asignados. Mantiene la búsqueda alineada con la lista.
+    const hoy = diaSemanaSantiago(new Date());
+    if (hoy) params.push(hoy);
     const { rows } = await db.query(
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial,
@@ -88,11 +108,45 @@ async function buscarProductos(req, res) {
          FROM productos
         WHERE dep_id = ?
           AND (pro_nombre_producto LIKE ? OR pro_codigo_plu LIKE ? OR pro_codigo_barra LIKE ?)
+          ${categoria ? 'AND pro_categoria = ?' : ''}
+          ${hoy ? "AND (pro_dias_elaboracion IS NULL OR pro_dias_elaboracion = '' OR FIND_IN_SET(?, pro_dias_elaboracion))" : ''}
         ORDER BY pro_nombre_producto LIMIT 15`,
-      [dep_id, b, b, b]
+      params
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// GET /api/productos-lista?dep_id=22[&categoria=normal|especial]
+// Lista completa (sin límite) de productos de un depto, opcionalmente filtrada
+// por categoría. Pública: la usa el perfil "Áreas Productivas" para ver productos.
+async function listarProductosPorCategoria(req, res) {
+  try {
+    const { dep_id } = req.query;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
+    const categoria = (req.query.categoria === 'normal' || req.query.categoria === 'especial') ? req.query.categoria : null;
+    const params = [dep_id];
+    if (categoria) params.push(categoria);
+    const { rows } = await db.query(
+      `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
+              vta_total_periodo, dias_historial, pro_categoria
+         FROM productos
+        WHERE dep_id = ?
+          ${categoria ? 'AND pro_categoria = ?' : ''}
+        ORDER BY pro_nombre_producto`,
+      params
+    );
+    res.json(rows.map((r) => ({
+      pro_codigo_plu: r.pro_codigo_plu,
+      pro_codigo_barra: r.pro_codigo_barra,
+      pro_nombre_producto: r.pro_nombre_producto,
+      pro_categoria: r.pro_categoria,
+      vta_diaria: ventaDiaria(r.vta_total_periodo, r.dias_historial),
+    })));
+  } catch (err) {
+    console.error('[listarProductosPorCategoria]', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar los productos' });
+  }
 }
 
 // GET /api/admin/productos/:plu
@@ -131,6 +185,110 @@ async function actualizarProducto(req, res) {
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// ── Clasificación de productos (panel admin) ─────────────────────
+// Reemplaza los antiguos perfiles "Producción" (normal/especial) e
+// "Infaltables → Clasificar" (jornada). Todo se gestiona desde aquí.
+const CATEGORIAS = ['sin_clasificar', 'normal', 'especial'];
+const JORNADAS   = ['am', 'pm']; // null = sin asignar
+
+// Venta diaria segura (mismo criterio que el motor de demanda)
+function ventaDiaria(vta, dias) {
+  const v = Number(vta), d = Number(dias);
+  if (!Number.isFinite(v) || !Number.isFinite(d) || d <= 0) return 0;
+  return Math.round((v / d) * 100) / 100;
+}
+
+// GET /api/admin/clasificacion?dep_id=22
+// Lista productos con sus 3 marcas + vta diaria para clasificar en lote.
+async function listarClasificacion(req, res) {
+  try {
+    const { dep_id } = req.query;
+    if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
+    const { rows } = await db.query(
+      `SELECT pro_codigo_plu, pro_nombre_producto, vta_total_periodo, dias_historial,
+              pro_categoria, pro_infaltable, pro_jornada, pro_dias_elaboracion
+         FROM productos
+        WHERE dep_id = ?
+        ORDER BY (vta_total_periodo / NULLIF(dias_historial,0)) DESC, pro_nombre_producto`,
+      [dep_id]
+    );
+    res.json(rows.map((r) => ({
+      pro_codigo_plu: r.pro_codigo_plu,
+      pro_nombre_producto: r.pro_nombre_producto,
+      vta_diaria: ventaDiaria(r.vta_total_periodo, r.dias_historial),
+      pro_categoria: r.pro_categoria,
+      pro_infaltable: !!r.pro_infaltable,
+      pro_jornada: r.pro_jornada,
+      pro_dias_elaboracion: r.pro_dias_elaboracion || '',
+    })));
+  } catch (err) {
+    console.error('[listarClasificacion]', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar los productos' });
+  }
+}
+
+// Normaliza/valida días de elaboración: string CSV de dígitos 1-7 (1=Lunes…7=Domingo).
+// Devuelve { ok, valor } donde valor es el CSV ordenado y deduplicado, o null si vacío.
+const DIAS_RE = /^[1-7](,[1-7])*$/;
+function normalizarDiasElaboracion(raw) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return { ok: true, valor: null };
+  const limpio = String(raw).split(',').map((d) => d.trim()).filter(Boolean).join(',');
+  if (!DIAS_RE.test(limpio)) return { ok: false };
+  const unicos = [...new Set(limpio.split(','))].sort();
+  return { ok: true, valor: unicos.join(',') };
+}
+
+// POST /api/admin/clasificacion/bulk
+// Body: { dep_id, cambios: [{ pro_codigo_plu, pro_categoria?, pro_infaltable?, pro_jornada?, pro_dias_elaboracion? }] }
+// Cada campo es opcional: solo se actualiza lo que venga en el cambio.
+async function clasificarBulk(req, res) {
+  const { dep_id, cambios } = req.body;
+  if (!dep_id || !Array.isArray(cambios) || cambios.length === 0) {
+    return res.status(400).json({ error: 'Datos inválidos' });
+  }
+  // Validar antes de tocar la BD
+  for (const c of cambios) {
+    if (!c.pro_codigo_plu) return res.status(400).json({ error: 'PLU faltante' });
+    if (c.pro_categoria !== undefined && !CATEGORIAS.includes(c.pro_categoria)) {
+      return res.status(400).json({ error: `Categoría inválida: ${c.pro_categoria}` });
+    }
+    if (c.pro_jornada !== undefined && c.pro_jornada !== null && !JORNADAS.includes(c.pro_jornada)) {
+      return res.status(400).json({ error: `Jornada inválida: ${c.pro_jornada}` });
+    }
+    if (c.pro_dias_elaboracion !== undefined && !normalizarDiasElaboracion(c.pro_dias_elaboracion).ok) {
+      return res.status(400).json({ error: `Días de elaboración inválidos: ${c.pro_dias_elaboracion}` });
+    }
+  }
+
+  let connection;
+  try {
+    connection = await db.pool.getConnection();
+    await connection.beginTransaction();
+    for (const c of cambios) {
+      const sets = [];
+      const params = [];
+      if (c.pro_categoria !== undefined) { sets.push('pro_categoria = ?'); params.push(c.pro_categoria); }
+      if (c.pro_infaltable !== undefined) { sets.push('pro_infaltable = ?'); params.push(c.pro_infaltable ? 1 : 0); }
+      if (c.pro_jornada !== undefined) { sets.push('pro_jornada = ?'); params.push(c.pro_jornada); }
+      if (c.pro_dias_elaboracion !== undefined) { sets.push('pro_dias_elaboracion = ?'); params.push(normalizarDiasElaboracion(c.pro_dias_elaboracion).valor); }
+      if (!sets.length) continue; // nada que actualizar para este ítem
+      params.push(c.pro_codigo_plu, dep_id);
+      await connection.query(
+        `UPDATE productos SET ${sets.join(', ')} WHERE pro_codigo_plu = ? AND dep_id = ?`,
+        params
+      );
+    }
+    await connection.commit();
+    res.json({ ok: true, actualizados: cambios.length });
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('[clasificarBulk]', err.message);
+    res.status(500).json({ error: 'No se pudo guardar la clasificación' });
+  } finally {
+    if (connection) connection.release();
+  }
 }
 
 // GET /api/admin/export
@@ -429,6 +587,7 @@ module.exports = {
   listarUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario,
   obtenerConfig, actualizarConfig,
   subirCSV,
-  buscarProductos, obtenerProducto, actualizarProducto, exportarExcel,
+  buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
+  listarClasificacion, clasificarBulk,
   obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, exportarMasterExcel
 };

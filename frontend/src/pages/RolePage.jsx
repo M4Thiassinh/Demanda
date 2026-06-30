@@ -5,7 +5,7 @@ import { getDepartamentos, getUsuarios, iniciarRevision, buscarRevisionActiva } 
 
 export default function RolePage() {
   const navigate = useNavigate()
-  const { setRole, setDepartamento, setUsuario, setRevision, clearRevision, logout, role } = useAppStore()
+  const { setRole, setCategoria, setDepartamento, setUsuario, setRevision, clearRevision, logout, role } = useAppStore()
 
   const [departamentos, setDepartamentos] = useState([])
   const [usuarios, setUsuarios]           = useState([])
@@ -49,6 +49,16 @@ export default function RolePage() {
     } finally { setCargando(false) }
   }
 
+  // Administración (operador) → áreas productivas. Toma de Stock → áreas no productivas.
+  // Ambos comparten el formulario (usuario + depto) y el flujo de revisión.
+  const esTomaStock      = role === 'toma_stock'
+  const esPerfilRevision = role === 'operador' || esTomaStock
+  const tituloPerfil = esTomaStock ? 'Toma de Stock' : 'Solicitud Producción Administración'
+  const iconoPerfil  = esTomaStock ? '📦' : '📋'
+  const depsVisibles = esTomaStock
+    ? departamentos.filter((d) => !d.dep_productiva)
+    : departamentos.filter((d) => d.dep_productiva)
+
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
       <div className="absolute inset-0 pointer-events-none">
@@ -68,12 +78,33 @@ export default function RolePage() {
       {!role && (
         <div className="relative w-full max-w-sm space-y-4 animate-slide-up">
           <p className="text-center text-gray-400 font-medium mb-4">¿Con qué perfil ingresas?</p>
-          <button id="btn-operador" onClick={() => setRole('operador')}
+          <button id="btn-operador" onClick={() => { setRole('operador'); setCategoria('normal') }}
             className="w-full card p-5 text-left hover:border-brand-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
             <div className="w-14 h-14 bg-brand-600/20 rounded-2xl flex items-center justify-center text-3xl">📋</div>
-            <div><p className="text-white font-bold text-lg">Operador de Sala</p>
-              <p className="text-gray-400 text-sm">Revisar stock y reponer productos</p></div>
+            <div><p className="text-white font-bold text-lg">Solicitud Producción Administración</p>
+              <p className="text-gray-400 text-sm">Productos normales · áreas productivas</p></div>
             <span className="ml-auto text-gray-500 group-hover:text-brand-400">→</span>
+          </button>
+          <button id="btn-toma-stock" onClick={() => { setRole('toma_stock'); setCategoria(null) }}
+            className="w-full card p-5 text-left hover:border-emerald-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
+            <div className="w-14 h-14 bg-emerald-600/20 rounded-2xl flex items-center justify-center text-3xl">📦</div>
+            <div><p className="text-white font-bold text-lg">Toma de Stock</p>
+              <p className="text-gray-400 text-sm">Reposición · áreas no productivas</p></div>
+            <span className="ml-auto text-gray-500 group-hover:text-emerald-400">→</span>
+          </button>
+          <button id="btn-produccion" onClick={() => { setRole('produccion'); setCategoria('especial'); navigate('/areas-productivas') }}
+            className="w-full card p-5 text-left hover:border-amber-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
+            <div className="w-14 h-14 bg-amber-600/20 rounded-2xl flex items-center justify-center text-3xl">🏭</div>
+            <div><p className="text-white font-bold text-lg">Solicitud Producción Áreas Productivas</p>
+              <p className="text-gray-400 text-sm">Solicitar productos especiales (áreas productivas)</p></div>
+            <span className="ml-auto text-gray-500 group-hover:text-amber-400">→</span>
+          </button>
+          <button id="btn-infaltables" onClick={() => { setRole('infaltables'); navigate('/infaltables') }}
+            className="w-full card p-5 text-left hover:border-rose-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
+            <div className="w-14 h-14 bg-rose-600/20 rounded-2xl flex items-center justify-center text-3xl">🎯</div>
+            <div><p className="text-white font-bold text-lg">Infaltables</p>
+              <p className="text-gray-400 text-sm">Chequear productos que no pueden faltar</p></div>
+            <span className="ml-auto text-gray-500 group-hover:text-rose-400">→</span>
           </button>
           <button id="btn-admin" onClick={() => { setRole('admin'); navigate('/admin') }}
             className="w-full card p-5 text-left hover:border-gray-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
@@ -85,16 +116,16 @@ export default function RolePage() {
         </div>
       )}
 
-      {/* Formulario Operador */}
-      {role === 'operador' && (
+      {/* Formulario de revisión (Administración / Toma de Stock) */}
+      {esPerfilRevision && (
         <div className="relative w-full max-w-sm animate-slide-up">
           <button onClick={() => { logout(); setDepSel(''); setUsuSel('') }} className="text-gray-400 hover:text-white text-sm mb-5 transition-colors flex items-center gap-1">
             ← Volver
           </button>
           <div className="card p-6 space-y-4">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-11 h-11 bg-brand-600/20 rounded-xl flex items-center justify-center text-2xl">📋</div>
-              <div><p className="text-white font-bold">Operador de Sala</p>
+              <div className="w-11 h-11 bg-brand-600/20 rounded-xl flex items-center justify-center text-2xl">{iconoPerfil}</div>
+              <div><p className="text-white font-bold">{tituloPerfil}</p>
                 <p className="text-gray-400 text-sm">Selecciona tu nombre y departamento</p></div>
             </div>
 
@@ -112,7 +143,7 @@ export default function RolePage() {
               <select id="sel-departamento" value={depSel} onChange={e => { setDepSel(e.target.value); setError('') }}
                 className="input-field text-base py-3.5">
                 <option value="">— Seleccionar —</option>
-                {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
+                {depsVisibles.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
               </select>
             </div>
 

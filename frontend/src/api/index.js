@@ -32,14 +32,15 @@ api.interceptors.request.use((config) => {
 export const loginAdmin = (password) => api.post('/admin/login', { password }).then(r => r.data)
 export const loginMaster = (password) => api.post('/admin/login-master', { password }).then(r => r.data)
 
-export const getDepartamentos = () => api.get('/departamentos').then(r => r.data)
+export const getDepartamentos = (productiva) => api.get('/departamentos', { params: productiva ? { productiva: 1 } : {} }).then(r => r.data)
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
 export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)
 export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
 export const crearUsuario = (data) => api.post('/admin/usuarios', data).then(r => r.data)
 export const actualizarUsuario = (id, data) => api.put(`/admin/usuarios/${id}`, data).then(r => r.data)
 export const eliminarUsuario = (id) => api.delete(`/admin/usuarios/${id}`).then(r => r.data)
-export const buscarProductos = (depId, q) => api.get('/productos', { params: { dep_id: depId, q } }).then(r => r.data)
+export const buscarProductos = (depId, q, categoria) => api.get('/productos', { params: { dep_id: depId, q, categoria } }).then(r => r.data)
+export const getProductosLista = (depId, categoria) => api.get('/productos-lista', { params: { dep_id: depId, categoria } }).then(r => r.data)
 
 // Admin
 export const getConfig = (depId) => api.get(`/admin/config/${depId}`).then(r => r.data)
@@ -61,10 +62,22 @@ export const iniciarRevision = (depId, usuId) => api.post('/revision', { dep_id:
 export const calcularItem = (revId, plu, stock) => api.post(`/revision/${revId}/calcular-item`, { pro_codigo_plu: plu, det_stock_sala: stock }).then(r => r.data)
 export const agregarDetalle = (revId, plu, stock, cantidad_pedir) => api.post(`/revision/${revId}/detalle`, { pro_codigo_plu: plu, det_stock_sala: stock, cantidad_pedir }).then(r => r.data)
 export const agregarDetalleBulk = (revId, items) => api.post(`/revision/${revId}/detalle/bulk`, { items }).then(r => r.data)
-export const obtenerNoEscaneados = (revId) => api.get(`/revision/${revId}/no-escaneados`).then(r => r.data)
-export const obtenerTodosRevision = (revId) => api.get(`/revision/${revId}/no-escaneados?all=true`).then(r => r.data)
+export const obtenerNoEscaneados = (revId, categoria) => api.get(`/revision/${revId}/no-escaneados`, { params: { categoria } }).then(r => r.data)
+export const obtenerTodosRevision = (revId, categoria) => api.get(`/revision/${revId}/no-escaneados`, { params: { all: true, categoria } }).then(r => r.data)
 export const obtenerRevision = (revId) => api.get(`/revision/${revId}`).then(r => r.data)
 export const eliminarDetalle = (revId, plu) => api.delete(`/revision/${revId}/detalle/${plu}`).then(r => r.data)
 export const finalizarRevision = (revId, items, emails_to) => api.post(`/revision/${revId}/finalizar`, { items, emails_to }).then(r => r.data)
+
+// Clasificación de productos (Panel Admin): categoría + infaltable + jornada
+export const getClasificacion = (depId) => api.get('/admin/clasificacion', { params: { dep_id: depId } }).then(r => r.data)
+export const clasificacionBulk = (depId, cambios) => api.post('/admin/clasificacion/bulk', { dep_id: depId, cambios }).then(r => r.data)
+
+// Infaltables
+export const getTurnoActual = () => api.get('/infaltables/turno-actual').then(r => r.data)
+export const getChecklistInfaltables = (depId, turno) => api.get('/infaltables/checklist', { params: { dep_id: depId, turno } }).then(r => r.data)
+export const guardarChequeoInfaltables = (data) => api.post('/infaltables/chequeo', data).then(r => r.data)
+export const getInfaltablesDashboard = () => api.get('/infaltables/dashboard').then(r => r.data)
+export const getInfaltablesConfig = (depId) => api.get('/infaltables/config', { params: { dep_id: depId } }).then(r => r.data)
+export const updateInfaltablesConfig = (depId, data) => api.put(`/infaltables/config/${depId}`, data).then(r => r.data)
 
 export default api

@@ -254,7 +254,7 @@ export default function MasterAdminPanel() {
         setIsAuth(true);
       }
     } catch (e) {
-      setAuthErr('Contraseña maestra incorrecta');
+      setAuthErr(e?.response?.data?.error || 'Contraseña maestra incorrecta');
     } finally {
       setLoading(false);
     }

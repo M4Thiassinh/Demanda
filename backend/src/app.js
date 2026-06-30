@@ -2,11 +2,17 @@ require('dotenv').config();
 const express    = require('express');
 const cors       = require('cors');
 const path       = require('path');
-const adminRoutes    = require('./routes/admin.routes');
-const operatorRoutes = require('./routes/operator.routes');
+const adminRoutes     = require('./routes/admin.routes');
+const operatorRoutes  = require('./routes/operator.routes');
+const infaltablesRoutes = require('./routes/infaltables.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
+
+// Detrás de Ngrok/reverse-proxy: confiar en X-Forwarded-For para que req.ip
+// sea la IP real del cliente (y no 127.0.0.1 para todos). Imprescindible para
+// que el rate-limiter de login distinga un dispositivo de otro.
+app.set('trust proxy', true);
 
 // ── Middlewares ──────────────────────────────────────────────
 // CORS: si se define CORS_ORIGINS (lista separada por comas) se restringe a esos orígenes;
@@ -20,6 +26,7 @@ app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 // ── API ──────────────────────────────────────────────────────
 app.use('/api', adminRoutes);
 app.use('/api/revision', operatorRoutes);
+app.use('/api/infaltables', infaltablesRoutes);
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
 // ── Frontend estático (producción) ───────────────────────────

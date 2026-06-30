@@ -1,9 +1,15 @@
 const db                        = require('../config/db');
 const ConfigService             = require('../services/ConfigService');
-const { calcularDemanda }       = require('../services/DemandCalculatorService');
+const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalculatorService');
 const { enviarOrdenProduccion } = require('../services/EmailService');
 
-const AREAS_PRODUCTIVAS = [22, 1347, 2347];
+// Normaliza el filtro de categoría que envía el front según el perfil:
+//   'normal'   → Solicitud Producción Administración
+//   'especial' → Solicitud Producción Áreas Productivas
+// Cualquier otro valor = sin filtro (compatibilidad).
+function normalizarCategoria(cat) {
+  return (cat === 'normal' || cat === 'especial') ? cat : null;
+}
 
 // Valida una lista de correos separados por coma. Devuelve { ok, lista, invalido }.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -139,20 +145,35 @@ async function obtenerNoEscaneados(req, res) {
   try {
     const { revId } = req.params;
     const { all } = req.query;
+    const categoria = normalizarCategoria(req.query.categoria);
     const revRes = await db.query(`SELECT dep_id, rev_fecha FROM revisiones WHERE rev_id = ?`, [revId]);
     if (!revRes.rows.length) return res.status(404).json({ error: 'Revisión no encontrada' });
     const rev = revRes.rows[0];
 
+    // Condiciones dinámicas del producto:
+    //  - categoría (normal/especial) según el perfil
+    //  - día de elaboración: solo aparece si hoy (zona Santiago) es uno de sus días,
+    //    o si no tiene días asignados (entonces aparece siempre).
+    const cond = ['p.dep_id = ?'];
+    const condParams = [rev.dep_id];
+    if (categoria) { cond.push('p.pro_categoria = ?'); condParams.push(categoria); }
+    const hoy = diaSemanaSantiago(rev.rev_fecha ? new Date(rev.rev_fecha) : new Date());
+    if (hoy) {
+      cond.push("(p.pro_dias_elaboracion IS NULL OR p.pro_dias_elaboracion = '' OR FIND_IN_SET(?, p.pro_dias_elaboracion))");
+      condParams.push(hoy);
+    }
+    const where = cond.join(' AND ');
+
     // Traer todos los productos del departamento (si all=true) o solo los no escaneados
     const prodRes = await db.query(
       all === 'true'
-        ? `SELECT p.* FROM productos p WHERE p.dep_id = ? ORDER BY p.pro_nombre_producto`
-        : `SELECT p.* 
+        ? `SELECT p.* FROM productos p WHERE ${where} ORDER BY p.pro_nombre_producto`
+        : `SELECT p.*
            FROM productos p
            LEFT JOIN detalle_revision dr ON dr.pro_codigo_plu = p.pro_codigo_plu AND dr.rev_id = ?
-           WHERE p.dep_id = ? AND dr.det_id IS NULL
+           WHERE ${where} AND dr.det_id IS NULL
            ORDER BY p.pro_nombre_producto`,
-      all === 'true' ? [rev.dep_id] : [revId, rev.dep_id]
+      all === 'true' ? condParams : [revId, ...condParams]
     );
 
     const config = await ConfigService.getConfig(rev.dep_id);
@@ -184,7 +205,8 @@ async function finalizarRevision(req, res) {
 
     const revRes = await db.query(
       `SELECT r.rev_id, r.rev_folio, r.dep_id, r.rev_fecha,
-              d.dep_nombre, d.dep_email_jefe, d.dep_emails_cc, COALESCE(u.usu_nombre,'Operador') AS usu_nombre
+              d.dep_nombre, d.dep_email_jefe, d.dep_emails_cc, d.dep_productiva,
+              COALESCE(u.usu_nombre,'Operador') AS usu_nombre
          FROM revisiones r
          JOIN departamentos d  ON d.dep_id = r.dep_id
          LEFT JOIN usuarios u  ON u.usu_id = r.usu_id
@@ -210,7 +232,7 @@ async function finalizarRevision(req, res) {
       [revId, rev.dep_id]
     );
 
-    const esProductivo = AREAS_PRODUCTIVAS.includes(Number(rev.dep_id));
+    const esProductivo = !!rev.dep_productiva;
 
     const resultados = detRes.rows.map((item) => {
       const calc = calcularDemanda(config, item, item.det_stock_sala, rev.rev_fecha);

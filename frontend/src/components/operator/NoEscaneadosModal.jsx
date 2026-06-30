@@ -7,9 +7,10 @@ export default function NoEscaneadosModal({ revId, onClose, onIndividualClick, o
   const [cargando, setCargando] = useState(true);
   const [seleccionados, setSeleccionados] = useState(new Set());
   const items = useAppStore(s => s.items);
+  const categoria = useAppStore(s => s.categoria);
 
   useEffect(() => {
-    obtenerNoEscaneados(revId)
+    obtenerNoEscaneados(revId, categoria)
       .then(res => {
         setRawProductos(res);
         setCargando(false);

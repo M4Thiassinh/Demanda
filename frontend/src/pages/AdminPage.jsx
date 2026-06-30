@@ -1,29 +1,30 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
-import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, buscarProductos, getProducto, updateProducto, exportarExcel } from '../api'
+import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, getClasificacion, clasificacionBulk } from '../api'
 import MasterAdminPanel from '../components/admin/MasterAdminPanel'
 
 // ── Tab Configuración ────────────────────────────────────────
 function ConfigTab() {
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '', dep_email_jefe: '', dep_emails_cc: '' })
+  const [cfg, setCfg]            = useState({ dias_produccion_semana: '', dias_seguridad_defecto: '', dep_email_jefe: '', dep_emails_cc: '', dep_productiva: false })
   const [msg, setMsg]            = useState(null)
   const [loading, setLoading]    = useState(false)
   const [showCrear, setShowCrear] = useState(false)
-  const [newDep, setNewDep]      = useState({ id: '', nombre: '', email: '', cc: '' })
+  const [newDep, setNewDep]      = useState({ id: '', nombre: '', email: '', cc: '', productiva: false })
 
   const loadDeps = () => getDepartamentos().then(setDeps)
   useEffect(() => { loadDeps() }, [])
   useEffect(() => {
     if (!depSel) return
     const d = departamentos.find(x => x.dep_id === depSel)
-    getConfig(depSel).then(c => setCfg({ 
-      dias_produccion_semana: c.dias_produccion_semana, 
+    getConfig(depSel).then(c => setCfg({
+      dias_produccion_semana: c.dias_produccion_semana,
       dias_seguridad_defecto: c.dias_seguridad_defecto,
       dep_email_jefe: d?.dep_email_jefe || '',
-      dep_emails_cc: d?.dep_emails_cc || ''
+      dep_emails_cc: d?.dep_emails_cc || '',
+      dep_productiva: !!d?.dep_productiva
     }))
   }, [depSel, departamentos])
 
@@ -31,7 +32,7 @@ function ConfigTab() {
     setLoading(true); setMsg(null)
     try {
       await updateConfig(depSel, { dias_produccion_semana: parseInt(cfg.dias_produccion_semana), dias_seguridad_defecto: parseInt(cfg.dias_seguridad_defecto) })
-      await updateDepartamento(depSel, { dep_nombre: departamentos.find(x => x.dep_id === depSel)?.dep_nombre, dep_email_jefe: cfg.dep_email_jefe, dep_emails_cc: cfg.dep_emails_cc })
+      await updateDepartamento(depSel, { dep_nombre: departamentos.find(x => x.dep_id === depSel)?.dep_nombre, dep_email_jefe: cfg.dep_email_jefe, dep_emails_cc: cfg.dep_emails_cc, dep_productiva: cfg.dep_productiva })
       await loadDeps()
       setMsg({ ok: true, texto: 'Guardado correctamente' })
     } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
@@ -41,9 +42,9 @@ function ConfigTab() {
   const crearDep = async () => {
     setLoading(true); setMsg(null)
     try {
-      await crearDepartamento({ dep_id: newDep.id, dep_nombre: newDep.nombre, dep_email_jefe: newDep.email, dep_emails_cc: newDep.cc })
+      await crearDepartamento({ dep_id: newDep.id, dep_nombre: newDep.nombre, dep_email_jefe: newDep.email, dep_emails_cc: newDep.cc, dep_productiva: newDep.productiva })
       await loadDeps()
-      setNewDep({ id: '', nombre: '', email: '', cc: '' })
+      setNewDep({ id: '', nombre: '', email: '', cc: '', productiva: false })
       setShowCrear(false)
       setDepSel(newDep.id)
       setMsg({ ok: true, texto: 'Departamento creado' })
@@ -69,6 +70,11 @@ function ConfigTab() {
           </div>
           <div><label className="label">Correo Jefe (opcional)</label><input type="email" value={newDep.email} onChange={e => setNewDep(n => ({...n, email: e.target.value}))} className="input-field" placeholder="Para recibir reportes de quiebres" /></div>
           <div><label className="label">Correos CC (opcional)</label><input type="text" value={newDep.cc} onChange={e => setNewDep(n => ({...n, cc: e.target.value}))} className="input-field" placeholder="Separados por coma" /></div>
+          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={newDep.productiva} onChange={e => setNewDep(n => ({...n, productiva: e.target.checked}))}
+              className="rounded border-gray-600 bg-gray-800 text-brand-500 focus:ring-brand-500" />
+            Área productiva <span className="text-gray-500 text-xs">(el operador digita la cantidad a producir)</span>
+          </label>
           <button onClick={crearDep} disabled={loading || !newDep.id || !newDep.nombre} className="btn-primary w-full disabled:opacity-50 text-sm py-2">
             Confirmar Creación
           </button>
@@ -102,14 +108,26 @@ function ConfigTab() {
             <input id="cfg-dias-seg" type="number" min={0} value={cfg.dias_seguridad_defecto}
               onChange={e => setCfg(c => ({ ...c, dias_seguridad_defecto: e.target.value }))} className="input-field" />
           </div>
-          <div className="bg-gray-900 rounded-xl p-3 text-xs font-mono text-gray-400 space-y-1 border border-gray-700/40">
-            <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Lógica de Negocio — Lotes de Producción</p>
-            <p>venta_diaria = ventas / dias_historial</p>
-            <p>días_prod = override ?? <span className="text-yellow-400">{cfg.dias_produccion_semana}</span> (días/semana)</p>
-            <p>lote_base = (venta_diaria × 7) / días_prod</p>
-            <p>stock_seg = venta_diaria × (override ?? venta_diaria {">"}20 ? 1 : 2)</p>
-            <p>demanda = lote_base + stock_seg</p>
-            <p className="text-white">requerimiento = demanda − stock_sala → Math.ceil()</p>
+          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer bg-gray-900 px-3 py-2.5 rounded-xl border border-gray-700/40">
+            <input type="checkbox" checked={cfg.dep_productiva} onChange={e => setCfg(c => ({ ...c, dep_productiva: e.target.checked }))}
+              className="rounded border-gray-600 bg-gray-800 text-brand-500 focus:ring-brand-500" />
+            Área productiva <span className="text-gray-500 text-xs">(el operador digita la cantidad a producir en vez de autocalcularse)</span>
+          </label>
+          <div className="bg-gray-900 rounded-xl p-4 text-sm text-gray-300 space-y-3 border border-gray-700/40">
+            <p className="text-gray-400 text-xs uppercase tracking-wider font-semibold">¿Cómo se calcula cuánto producir?</p>
+            <ol className="space-y-2 list-decimal list-outside ml-4">
+              <li><span className="text-white font-semibold">Venta diaria:</span> el promedio de lo que se vende por día (ventas del período ÷ días del período).</li>
+              <li><span className="text-white font-semibold">Lote de producción:</span> la venta de toda la semana repartida entre los días que se produce
+                (<span className="text-yellow-400 font-semibold">{cfg.dias_produccion_semana || '—'}</span> día(s)/semana). Mientras menos días se produce, más grande es cada lote.</li>
+              <li><span className="text-white font-semibold">Stock de seguridad:</span> un colchón extra de
+                <span className="text-yellow-400 font-semibold"> {cfg.dias_seguridad_defecto || '—'}</span> día(s) de venta para no quedar sin producto.</li>
+              <li><span className="text-white font-semibold">Demanda total:</span> el lote de producción + el stock de seguridad.</li>
+              <li><span className="text-white font-semibold">Cantidad a producir:</span> la demanda total menos lo que ya hay en sala.
+                Si ya hay suficiente, no se produce nada.</li>
+            </ol>
+            <p className="text-gray-500 text-xs pt-1 border-t border-gray-700/40">
+              💡 Cada producto puede tener sus propios días de producción y de seguridad; si no, se usan estos valores del departamento.
+            </p>
           </div>
           {msg && <p className={`text-sm text-center font-medium rounded-lg p-2 ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
           <button id="btn-guardar-cfg" onClick={guardar} disabled={loading} className="btn-primary w-full disabled:opacity-50">
@@ -192,142 +210,6 @@ function CsvTab() {
       <button id="btn-importar" onClick={cargar} disabled={loading || !archivo || !depSel} className="btn-primary w-full disabled:opacity-40">
         {loading ? '⏳ Importando…' : '📤 Importar Maestro'}
       </button>
-    </div>
-  )
-}
-
-// ── Tab Productos ─────────────────────────────────────────────
-function ProductosTab() {
-  const [departamentos, setDeps] = useState([])
-  const [depSel, setDepSel]      = useState('')
-  const [q, setQ]                = useState('')
-  const [resultados, setRes]     = useState([])
-  const [seleccionado, setSel]   = useState(null)
-  const [form, setForm]          = useState({ pro_codigo_barra: '', pro_dias_produccion_override: '', pro_dias_seguridad_override: '', pro_dias_elaboracion: '', pro_cantidad_minima: '' })
-  const [msg, setMsg]            = useState(null)
-
-  useEffect(() => { getDepartamentos().then(setDeps) }, [])
-
-  const buscar = async () => {
-    if (!depSel) return
-    try { 
-      const res = await buscarProductos(depSel, q)
-      if (Array.isArray(res)) setRes(res)
-    } catch {}
-  }
-
-  const seleccionar = async (p) => {
-    const det = await getProducto(p.pro_codigo_plu, depSel)
-    setSel(det)
-    setForm({
-      pro_codigo_barra:            det.pro_codigo_barra            || '',
-      pro_dias_produccion_override: det.pro_dias_produccion_override ?? '',
-      pro_dias_seguridad_override:  det.pro_dias_seguridad_override  ?? '',
-      pro_dias_elaboracion:         det.pro_dias_elaboracion         || '',
-      pro_cantidad_minima:          det.pro_cantidad_minima          ?? '',
-    })
-    setMsg(null)
-  }
-
-  const guardar = async () => {
-    try {
-      await updateProducto(seleccionado.pro_codigo_plu, depSel, { ...form })
-      setMsg({ ok: true, texto: 'Producto actualizado' })
-    } catch (e) { setMsg({ ok: false, texto: e?.response?.data?.error || 'Error' }) }
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="label">Departamento</label>
-          <select value={depSel} onChange={e => setDepSel(e.target.value)} className="input-field text-sm py-2.5">
-            <option value="">— Dep —</option>
-            {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="label">Buscar</label>
-          <input type="text" value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && buscar()}
-            placeholder="PLU o nombre…" className="input-field text-sm py-2.5" />
-        </div>
-        <div className="flex items-end">
-          <button onClick={buscar} className="btn-secondary py-2.5 px-4 text-sm">🔍</button>
-        </div>
-      </div>
-
-      {resultados.length > 0 && !seleccionado && (
-        <div className="card overflow-hidden animate-slide-up">
-          {resultados.map(p => (
-            <div key={p.pro_codigo_plu} onClick={() => seleccionar(p)}
-              className="flex items-center px-4 py-3 hover:bg-gray-700/50 cursor-pointer border-b border-gray-700/30 last:border-0">
-              <div className="flex-1">
-                <p className="text-white text-sm font-medium">{p.pro_nombre_producto}</p>
-                <p className="text-gray-500 text-xs font-mono">PLU {p.pro_codigo_plu}</p>
-              </div>
-              <span className="text-brand-400 text-xs">Editar →</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {seleccionado && (
-        <div className="card p-5 space-y-4 animate-slide-up">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white font-bold text-sm">{seleccionado.pro_nombre_producto}</p>
-              <p className="text-gray-500 text-xs font-mono">PLU {seleccionado.pro_codigo_plu}</p>
-            </div>
-            <button onClick={() => { setSel(null); setRes([]) }} className="text-gray-500 hover:text-white text-sm">✕</button>
-          </div>
-          <div>
-            <label className="label">Código de Barras</label>
-            <input type="text" value={form.pro_codigo_barra} onChange={e => setForm(f => ({ ...f, pro_codigo_barra: e.target.value }))} className="input-field" placeholder="(opcional)" />
-          </div>
-          <div>
-            <label className="label">Días Producción/Semana <span className="text-gray-500 font-normal text-xs">(vacío = usar config depto)</span></label>
-            <input type="number" min={1} max={7} value={form.pro_dias_produccion_override}
-              onChange={e => setForm(f => ({ ...f, pro_dias_produccion_override: e.target.value }))}
-              className="input-field" placeholder="Ej: 2, 3… Vacío = default depto" />
-          </div>
-          <div>
-            <label className="label">Días de Seguridad <span className="text-gray-500 font-normal text-xs">(vacío = lógica automática)</span></label>
-            <input type="number" min={0} value={form.pro_dias_seguridad_override}
-              onChange={e => setForm(f => ({ ...f, pro_dias_seguridad_override: e.target.value }))}
-              className="input-field" placeholder="Vacío = auto" />
-          </div>
-          <div>
-            <label className="label">Días Específicos de Elaboración</label>
-            <div className="grid grid-cols-4 gap-2 mt-1">
-              {[ {d:1,l:'Lun'}, {d:2,l:'Mar'}, {d:3,l:'Mié'}, {d:4,l:'Jue'}, {d:5,l:'Vie'}, {d:6,l:'Sáb'}, {d:7,l:'Dom'} ].map(dia => {
-                const checked = form.pro_dias_elaboracion ? form.pro_dias_elaboracion.split(',').includes(String(dia.d)) : false;
-                return (
-                  <label key={dia.d} className="flex items-center gap-2 text-sm text-gray-300 bg-gray-900 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-800">
-                    <input type="checkbox" checked={checked} 
-                      onChange={(e) => {
-                        let arr = form.pro_dias_elaboracion ? form.pro_dias_elaboracion.split(',') : [];
-                        if (e.target.checked) arr.push(String(dia.d));
-                        else arr = arr.filter(x => x !== String(dia.d));
-                        setForm(f => ({ ...f, pro_dias_elaboracion: arr.sort().join(',') }));
-                      }} 
-                      className="rounded border-gray-600 bg-gray-800 text-brand-500 focus:ring-brand-500" />
-                    {dia.l}
-                  </label>
-                )
-              })}
-            </div>
-            <p className="text-gray-500 text-xs mt-1">Si marcas días, el producto solo se pedirá si HOY es uno de esos días. Si no hay marcas, se pedirá siempre.</p>
-          </div>
-          <div>
-            <label className="label">Cantidad Mínima de Producción</label>
-            <input type="number" min={0} value={form.pro_cantidad_minima}
-              onChange={e => setForm(f => ({ ...f, pro_cantidad_minima: e.target.value }))}
-              className="input-field" placeholder="0 = sin mínimo" />
-          </div>
-          {msg && <p className={`text-sm text-center font-medium p-2 rounded-lg ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
-          <button onClick={guardar} className="btn-primary w-full">Guardar Producto</button>
-        </div>
-      )}
     </div>
   )
 }
@@ -486,6 +368,296 @@ function ExportTab() {
   )
 }
 
+// ── Tab Clasificación ─────────────────────────────────────────
+// Reemplaza los antiguos perfiles "Producción" (normal/especial) e
+// "Infaltables → Clasificar jornada". Todo se gestiona aquí, por depto.
+const CATS_CLAS  = [
+  { key: 'normal',   label: 'Normal',   on: 'bg-emerald-600 border-emerald-500 text-white' },
+  { key: 'especial', label: 'Especial', on: 'bg-sky-600 border-sky-500 text-white' },
+]
+const JORNADAS_CLAS = [
+  { key: 'am', label: 'AM' },
+  { key: 'pm', label: 'PM' },
+]
+
+function ClasificacionTab() {
+  const [departamentos, setDeps] = useState([])
+  const [depSel, setDepSel]   = useState('')
+  const [productos, setProductos] = useState([])
+  const [edits, setEdits]     = useState({})   // { plu: { pro_categoria?, pro_infaltable?, pro_jornada? } }
+  const [search, setSearch]   = useState('')
+  const [filtro, setFiltro]   = useState('todos') // todos | sin_clasificar | normal | especial | infaltables
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [msg, setMsg]         = useState(null)
+
+  useEffect(() => { getDepartamentos().then(setDeps).catch(() => {}) }, [])
+
+  useEffect(() => {
+    if (!depSel) { setProductos([]); setEdits({}); return }
+    setLoading(true)
+    getClasificacion(depSel)
+      .then((data) => { setProductos(data); setEdits({}) })
+      .catch(() => setMsg({ ok: false, texto: 'No se pudieron cargar los productos' }))
+      .finally(() => setLoading(false))
+  }, [depSel])
+
+  // valor efectivo (original + edición local)
+  const valActual = (p, campo) => (edits[p.pro_codigo_plu]?.[campo] !== undefined ? edits[p.pro_codigo_plu][campo] : p[campo])
+
+  const setCampo = (p, campo, valor) => setEdits((prev) => {
+    const plu = p.pro_codigo_plu
+    const next = { ...prev, [plu]: { ...prev[plu] } }
+    if (p[campo] === valor) delete next[plu][campo]   // volver al original = no es cambio
+    else next[plu][campo] = valor
+    if (Object.keys(next[plu]).length === 0) delete next[plu]
+    return next
+  })
+
+  const visibles = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return productos.filter((p) => {
+      const cat = valActual(p, 'pro_categoria')
+      const inf = valActual(p, 'pro_infaltable')
+      if (filtro === 'infaltables' && !inf) return false
+      if (['sin_clasificar', 'normal', 'especial'].includes(filtro) && cat !== filtro) return false
+      if (!q) return true
+      return p.pro_nombre_producto?.toLowerCase().includes(q) || String(p.pro_codigo_plu).includes(q)
+    })
+  }, [productos, edits, search, filtro])
+
+  const nCambios = Object.keys(edits).length
+
+  const guardar = async () => {
+    if (!nCambios) return
+    const cambios = Object.entries(edits).map(([pro_codigo_plu, campos]) => ({ pro_codigo_plu, ...campos }))
+    setSaving(true); setMsg(null)
+    try {
+      await clasificacionBulk(depSel, cambios)
+      // aplicar localmente sin recargar
+      setProductos((prev) => prev.map((p) => edits[p.pro_codigo_plu] ? { ...p, ...edits[p.pro_codigo_plu] } : p))
+      setEdits({})
+      setMsg({ ok: true, texto: `${cambios.length} producto(s) actualizado(s)` })
+    } catch (e) {
+      setMsg({ ok: false, texto: e?.response?.data?.error || 'No se pudo guardar' })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end justify-between">
+        <div className="flex-1 min-w-[200px]">
+          <label className="label">Departamento</label>
+          <select value={depSel} onChange={(e) => setDepSel(e.target.value)} className="input-field">
+            <option value="">— Elige un departamento —</option>
+            {departamentos.map((d) => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
+          </select>
+        </div>
+        <button onClick={guardar} disabled={!nCambios || saving}
+          className={`btn-primary py-2.5 px-4 text-sm ${nCambios ? 'animate-pulse' : 'opacity-50'}`}>
+          {saving ? 'Guardando…' : `💾 Guardar${nCambios ? ` (${nCambios})` : ''}`}
+        </button>
+      </div>
+
+      {msg && <p className={`text-sm text-center font-medium rounded-lg p-2 ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
+
+      {depSel && (
+        <>
+          <div className="card p-3 flex flex-wrap gap-2 items-center">
+            <input type="text" placeholder="🔍 Buscar por nombre o PLU…" value={search}
+              onChange={(e) => setSearch(e.target.value)} className="input-field flex-1 min-w-[180px]" />
+            <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="input-field w-auto">
+              <option value="todos">Todos</option>
+              <option value="sin_clasificar">Sin clasificar</option>
+              <option value="normal">Normales</option>
+              <option value="especial">Especiales</option>
+              <option value="infaltables">Infaltables</option>
+            </select>
+          </div>
+
+          <div className="card divide-y divide-gray-800 overflow-hidden">
+            {loading ? (
+              <p className="text-center text-gray-500 py-8">Cargando…</p>
+            ) : visibles.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">Sin productos</p>
+            ) : visibles.map((p) => {
+              const cat = valActual(p, 'pro_categoria')
+              const inf = valActual(p, 'pro_infaltable')
+              const jor = valActual(p, 'pro_jornada')
+              const editado = edits[p.pro_codigo_plu] !== undefined
+              return (
+                <div key={p.pro_codigo_plu} className={`p-3 space-y-2 ${editado ? 'bg-brand-900/10' : ''}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-white text-sm font-medium truncate">{p.pro_nombre_producto}</p>
+                      <p className="text-gray-500 text-xs font-mono">
+                        PLU {p.pro_codigo_plu} · Vta diaria: <span className="text-emerald-300">{p.vta_diaria}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {/* Categoría */}
+                    <div className="flex gap-1">
+                      {CATS_CLAS.map((c) => (
+                        <button key={c.key} onClick={() => setCampo(p, 'pro_categoria', cat === c.key ? 'sin_clasificar' : c.key)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${cat === c.key ? c.on : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Infaltable */}
+                    <button onClick={() => setCampo(p, 'pro_infaltable', !inf)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${inf ? 'bg-rose-600 border-rose-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                      🎯 Infaltable
+                    </button>
+                    {/* Jornada (solo relevante si es infaltable) */}
+                    <div className={`flex gap-1 ml-auto ${inf ? '' : 'opacity-40'}`}>
+                      {JORNADAS_CLAS.map((j) => (
+                        <button key={j.key} onClick={() => setCampo(p, 'pro_jornada', jor === j.key ? null : j.key)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${jor === j.key ? 'bg-brand-600 border-brand-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                          {j.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Tab Días de producción ────────────────────────────────────
+// Asigna, por depto, los días en que se elabora cada producto (pro_dias_elaboracion).
+// Si un producto tiene días marcados, en "Solicitud Producción Administración" solo
+// aparece cuando hoy es uno de esos días. Sin días = aparece siempre.
+const DIAS_SEMANA = [
+  { d: '1', l: 'Lun' }, { d: '2', l: 'Mar' }, { d: '3', l: 'Mié' },
+  { d: '4', l: 'Jue' }, { d: '5', l: 'Vie' }, { d: '6', l: 'Sáb' }, { d: '7', l: 'Dom' },
+]
+
+function DiasProduccionTab() {
+  const [departamentos, setDeps] = useState([])
+  const [depSel, setDepSel]   = useState('')
+  const [productos, setProductos] = useState([])
+  const [edits, setEdits]     = useState({})   // { plu: "1,3,5" }
+  const [search, setSearch]   = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [msg, setMsg]         = useState(null)
+
+  useEffect(() => { getDepartamentos().then(setDeps).catch(() => {}) }, [])
+
+  useEffect(() => {
+    if (!depSel) { setProductos([]); setEdits({}); return }
+    setLoading(true)
+    getClasificacion(depSel)
+      .then((data) => { setProductos(data); setEdits({}) })
+      .catch(() => setMsg({ ok: false, texto: 'No se pudieron cargar los productos' }))
+      .finally(() => setLoading(false))
+  }, [depSel])
+
+  const diasActual = (p) => (edits[p.pro_codigo_plu] !== undefined ? edits[p.pro_codigo_plu] : (p.pro_dias_elaboracion || ''))
+
+  const toggleDia = (p, dia) => setEdits((prev) => {
+    const actual = prev[p.pro_codigo_plu] !== undefined ? prev[p.pro_codigo_plu] : (p.pro_dias_elaboracion || '')
+    const set = new Set(actual ? actual.split(',') : [])
+    set.has(dia) ? set.delete(dia) : set.add(dia)
+    const nuevo = [...set].sort().join(',')
+    const orig = p.pro_dias_elaboracion || ''
+    const next = { ...prev }
+    if (nuevo === orig) delete next[p.pro_codigo_plu]   // volver al original = no es cambio
+    else next[p.pro_codigo_plu] = nuevo
+    return next
+  })
+
+  const visibles = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return productos
+    return productos.filter((p) => p.pro_nombre_producto?.toLowerCase().includes(q) || String(p.pro_codigo_plu).includes(q))
+  }, [productos, search])
+
+  const nCambios = Object.keys(edits).length
+
+  const guardar = async () => {
+    if (!nCambios) return
+    const cambios = Object.entries(edits).map(([pro_codigo_plu, pro_dias_elaboracion]) => ({ pro_codigo_plu, pro_dias_elaboracion }))
+    setSaving(true); setMsg(null)
+    try {
+      await clasificacionBulk(depSel, cambios)
+      setProductos((prev) => prev.map((p) => edits[p.pro_codigo_plu] !== undefined ? { ...p, pro_dias_elaboracion: edits[p.pro_codigo_plu] } : p))
+      setEdits({})
+      setMsg({ ok: true, texto: `${cambios.length} producto(s) actualizado(s)` })
+    } catch (e) {
+      setMsg({ ok: false, texto: e?.response?.data?.error || 'No se pudo guardar' })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end justify-between">
+        <div className="flex-1 min-w-[200px]">
+          <label className="label">Departamento</label>
+          <select value={depSel} onChange={(e) => setDepSel(e.target.value)} className="input-field">
+            <option value="">— Elige un departamento —</option>
+            {departamentos.map((d) => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
+          </select>
+        </div>
+        <button onClick={guardar} disabled={!nCambios || saving}
+          className={`btn-primary py-2.5 px-4 text-sm ${nCambios ? 'animate-pulse' : 'opacity-50'}`}>
+          {saving ? 'Guardando…' : `💾 Guardar${nCambios ? ` (${nCambios})` : ''}`}
+        </button>
+      </div>
+
+      {msg && <p className={`text-sm text-center font-medium rounded-lg p-2 ${msg.ok ? 'bg-emerald-900/40 text-emerald-400' : 'bg-rose-900/40 text-rose-400'}`}>{msg.ok ? '✅' : '❌'} {msg.texto}</p>}
+
+      {depSel && (
+        <>
+          <div className="card p-3">
+            <input type="text" placeholder="🔍 Buscar por nombre o PLU…" value={search}
+              onChange={(e) => setSearch(e.target.value)} className="input-field" />
+            <p className="text-gray-500 text-xs mt-2">Marca los días en que se elabora. Sin días marcados = el producto se pide siempre.</p>
+          </div>
+
+          <div className="card divide-y divide-gray-800 overflow-hidden">
+            {loading ? (
+              <p className="text-center text-gray-500 py-8">Cargando…</p>
+            ) : visibles.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">Sin productos</p>
+            ) : visibles.map((p) => {
+              const dias = diasActual(p)
+              const set = new Set(dias ? dias.split(',') : [])
+              const editado = edits[p.pro_codigo_plu] !== undefined
+              return (
+                <div key={p.pro_codigo_plu} className={`p-3 space-y-2 ${editado ? 'bg-brand-900/10' : ''}`}>
+                  <p className="text-white text-sm font-medium truncate">{p.pro_nombre_producto}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-gray-500 text-xs font-mono mr-1">PLU {p.pro_codigo_plu}</span>
+                    <div className="flex gap-1 ml-auto">
+                      {DIAS_SEMANA.map((dia) => {
+                        const on = set.has(dia.d)
+                        return (
+                          <button key={dia.d} onClick={() => toggleDia(p, dia.d)}
+                            className={`w-10 py-1.5 rounded-lg text-xs font-bold border transition-all ${on ? 'bg-brand-600 border-brand-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                            {dia.l}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Página Principal Admin ────────────────────────────────────
 export default function AdminPage() {
   const navigate = useNavigate()
@@ -509,7 +681,9 @@ export default function AdminPage() {
         setAuth(true)
       }
     } catch (e) {
-      setAuthErr('Contraseña incorrecta')
+      // Mostrar el mensaje real del servidor (p. ej. "Demasiados intentos")
+      // en lugar de asumir siempre que la contraseña es incorrecta.
+      setAuthErr(e?.response?.data?.error || 'Contraseña incorrecta')
     } finally {
       setLoading(false)
     }
@@ -547,16 +721,20 @@ export default function AdminPage() {
   }
 
   const tabs = [
-    { key: 'config',    label: '⚙️ Config' },
-    { key: 'usuarios',  label: '👥 Usuarios' },
-    { key: 'csv',       label: '📤 CSV' },
-    { key: 'productos', label: '📦 Productos' },
-    { key: 'master',    label: '📊 Maestro' },
-    { key: 'export',    label: '📥 Exportar' },
+    { key: 'config',        label: '⚙️ Config' },
+    { key: 'usuarios',      label: '👥 Usuarios' },
+    { key: 'csv',           label: '📤 CSV' },
+    { key: 'clasificacion', label: '🏷️ Clasificación' },
+    { key: 'dias',          label: '📅 Días producción' },
+    { key: 'master',        label: '📊 Maestro' },
+    { key: 'export',        label: '📥 Exportar' },
   ]
 
+  // El Maestro tiene una tabla ancha; le damos más espacio que al resto de pestañas.
+  const anchoTab = tab === 'master' ? 'max-w-6xl' : 'max-w-2xl'
+
   return (
-    <div className="min-h-screen bg-gray-950 max-w-2xl mx-auto">
+    <div className={`min-h-screen bg-gray-950 mx-auto ${anchoTab}`}>
       <header className="bg-gray-900 border-b border-gray-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => { logout(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
         <div><p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
@@ -577,12 +755,13 @@ export default function AdminPage() {
       </div>
 
       <div className="p-5 animate-fade-in">
-        {tab === 'config'    && <ConfigTab />}
-        {tab === 'usuarios'  && <UsuariosTab />}
-        {tab === 'csv'       && <CsvTab />}
-        {tab === 'productos' && <ProductosTab />}
-        {tab === 'master'    && <MasterAdminPanel />}
-        {tab === 'export'    && <ExportTab />}
+        {tab === 'config'        && <ConfigTab />}
+        {tab === 'usuarios'      && <UsuariosTab />}
+        {tab === 'csv'           && <CsvTab />}
+        {tab === 'clasificacion' && <ClasificacionTab />}
+        {tab === 'dias'          && <DiasProduccionTab />}
+        {tab === 'master'        && <MasterAdminPanel />}
+        {tab === 'export'        && <ExportTab />}
       </div>
     </div>
   )

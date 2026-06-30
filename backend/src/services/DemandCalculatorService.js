@@ -129,4 +129,4 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
   };
 }
 
-module.exports = { calcularDemanda };
+module.exports = { calcularDemanda, diaSemanaSantiago };

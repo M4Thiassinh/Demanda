@@ -299,4 +299,179 @@ async function enviarOrdenProduccion({ depNombre, depEmail, depEmailsCc, revFech
   });
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad };
+/** Genera buffer .xlsx — Chequeo de Infaltables */
+async function generarExcelInfaltables(productos, depNombre, turno, fecha) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Infaltables');
+
+  ws.columns = [
+    { header: 'Departamento', key: 'dep',    width: 18 },
+    { header: 'Turno',        key: 'turno',  width: 8 },
+    { header: 'Fecha',        key: 'fecha',  width: 22 },
+    { header: 'PLU',          key: 'plu',    width: 12 },
+    { header: 'Producto',     key: 'nombre', width: 40 },
+    { header: 'Estado',       key: 'estado', width: 12 },
+    { header: 'Stock Sistema',key: 'stock',  width: 14 },
+  ];
+
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB91C1C' } }; // rojo
+    cell.alignment = { horizontal: 'center' };
+  });
+
+  const fechaStr = new Date(fecha).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
+
+  productos.forEach((p, i) => {
+    const falta = !p.presente;
+    const row = ws.addRow({
+      dep: depNombre,
+      turno: String(turno).toUpperCase(),
+      fecha: fechaStr,
+      plu: p.pro_codigo_plu,
+      nombre: p.pro_nombre_producto,
+      estado: falta ? 'FALTA' : 'OK',
+      stock: p.stock_referencia != null ? Number(p.stock_referencia) : 's/d',
+    });
+    if (falta) {
+      row.getCell('estado').font = { bold: true, color: { argb: 'FFB91C1C' } };
+      row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; });
+    }
+  });
+
+  return wb.xlsx.writeBuffer();
+}
+
+/**
+ * Gráfico de barras VERTICALES (Real vs Meta por departamento) en HTML/CSS,
+ * compatible con clientes de correo (sin JS ni imágenes externas).
+ * dashboard: [{ dep_nombre, real(number|null), meta(number) }]
+ */
+function graficoDashboardHTML(dashboard) {
+  if (!Array.isArray(dashboard) || dashboard.length === 0) return '';
+
+  const ALTO = 140; // px de la barra más alta
+  const valores = dashboard.flatMap((d) => [d.real || 0, d.meta || 0]);
+  const escalaMax = Math.max(...valores, 10);
+  const h = (v) => Math.max(2, Math.round(((Number(v) || 0) / escalaMax) * ALTO));
+
+  const colReal = '#3b82f6';
+  const colMeta = '#f59e0b';
+
+  const barras = dashboard.map((d) => {
+    const real = d.real != null ? Number(d.real) : null;
+    const meta = Number(d.meta) || 0;
+    return `
+      <td style="vertical-align:bottom;text-align:center;padding:0 6px;">
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr style="vertical-align:bottom;">
+          <td style="vertical-align:bottom;text-align:center;padding:0 2px;">
+            <div style="font-size:10px;font-weight:700;color:${colReal};">${real != null ? real + '%' : 's/d'}</div>
+            <div style="width:18px;height:${h(real)}px;background:${colReal};border-radius:3px 3px 0 0;margin:0 auto;"></div>
+          </td>
+          <td style="vertical-align:bottom;text-align:center;padding:0 2px;">
+            <div style="font-size:10px;font-weight:700;color:${colMeta};">${meta}%</div>
+            <div style="width:18px;height:${h(meta)}px;background:${colMeta};border-radius:3px 3px 0 0;margin:0 auto;"></div>
+          </td>
+        </tr></table>
+      </td>`;
+  }).join('');
+
+  const etiquetas = dashboard.map((d) => `
+    <td style="text-align:center;font-size:10px;color:#475569;padding:5px 4px 0;border-top:1px solid #cbd5e1;">${esc(d.dep_nombre)}</td>`
+  ).join('');
+
+  return `
+    <div style="margin:6px 0 20px;">
+      <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#334155;">📊 Índice Faltante por Departamento</p>
+      <p style="margin:0 0 10px;font-size:11px;color:#64748b;">
+        <span style="display:inline-block;width:10px;height:10px;background:${colReal};border-radius:2px;"></span> Real &nbsp;
+        <span style="display:inline-block;width:10px;height:10px;background:${colMeta};border-radius:2px;"></span> Meta
+      </p>
+      <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tr style="vertical-align:bottom;height:${ALTO + 16}px;">${barras}</tr>
+        <tr>${etiquetas}</tr>
+      </table>
+    </div>`;
+}
+
+/**
+ * Envía el reporte de un chequeo de infaltables.
+ * productos: [{ pro_codigo_plu, pro_nombre_producto, presente(bool), stock_referencia }]
+ * dashboard: [{ dep_nombre, real, meta }] (para incluir el gráfico Real vs Meta)
+ */
+async function enviarReporteInfaltables({ depNombre, correosDestino, usuNombre, turno, fecha, meta, indice, productos, dashboard }) {
+  const destinatario = correosDestino || process.env.EMAIL_PRODUCCION;
+  if (!destinatario) return { enviado: false, motivo: 'sin destinatario' };
+
+  const fechaStr = new Date(fecha).toLocaleString('es-CL', {
+    timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short', hour12: false,
+  });
+
+  const total = productos.length;
+  const faltantes = productos.filter((p) => !p.presente);
+  const sobreMeta = Number(indice) > Number(meta);
+  const colorIndice = sobreMeta ? '#b91c1c' : '#15803d';
+
+  // Gráfico Real vs Meta por departamento (vertical, como el dashboard)
+  const grafico = graficoDashboardHTML(dashboard);
+
+  const filasFaltantes = faltantes.length
+    ? faltantes.map((p) => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${esc(p.pro_codigo_plu)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${esc(p.pro_nombre_producto)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#b91c1c;font-weight:700;">${esc(p.stock_referencia != null ? Number(p.stock_referencia) : 's/d')}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="3" style="padding:14px;text-align:center;color:#15803d;font-weight:700;">✓ Sin faltantes en este chequeo</td></tr>`;
+
+  const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;"><tr><td align="center">
+  <table width="640" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <tr><td style="background:linear-gradient(135deg,#b91c1c,#ef4444);padding:24px 28px;color:#fff;">
+      <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:2px;opacity:.85;">Teja Market — Control de Infaltables</p>
+      <h1 style="margin:6px 0 0;font-size:22px;">🎯 Reporte de Infaltables</h1>
+    </td></tr>
+    <tr><td style="padding:18px 28px;background:#fef2f2;border-bottom:1px solid #fecaca;">
+      <p style="margin:0;font-size:13px;color:#7f1d1d;">
+        <b>Depto:</b> ${esc(depNombre)} &nbsp;|&nbsp; <b>Turno:</b> ${esc(String(turno).toUpperCase())} &nbsp;|&nbsp;
+        <b>Responsable:</b> ${esc(usuNombre || '—')} &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
+      </p>
+    </td></tr>
+    <tr><td style="padding:20px 28px;">
+      <p style="margin:0 0 6px;font-size:14px;color:#334155;">
+        <b>${total}</b> infaltables · <b style="color:#b91c1c;">${faltantes.length}</b> faltante(s) ·
+        Índice: <b style="color:${colorIndice};">${indice}%</b> (meta ${meta}%) ${sobreMeta ? '⚠️ sobre la meta' : '✓ dentro de meta'}
+      </p>
+      ${grafico}
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <thead><tr style="background:#1e293b;color:#fff;">
+          <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto faltante</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Stock Sist.</th>
+        </tr></thead>
+        <tbody>${filasFaltantes}</tbody>
+      </table>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;text-align:center;font-size:11px;color:#94a3b8;">
+      Generado automáticamente — ${esc(fechaStr)}
+    </td></tr>
+  </table></td></tr></table></body></html>`;
+
+  const excelBuffer = await generarExcelInfaltables(productos, depNombre, turno, fecha);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to:   destinatario,
+    subject: `[Infaltables] ${depNombre} — Turno ${String(turno).toUpperCase()} — ${faltantes.length} faltante(s) (${indice}%)`,
+    html,
+    attachments: [{
+      filename: `infaltables_${depNombre}_${turno}.xlsx`,
+      content: excelBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }],
+  });
+
+  return { enviado: true };
+}
+
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables };

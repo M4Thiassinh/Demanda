@@ -92,6 +92,7 @@ router.post('/admin/login-master', rateLimitLogin, (req, res) => {
 router.get('/departamentos',              ctrl.listarDepartamentos);
 router.get('/usuarios',                   ctrl.listarUsuarios);
 router.get('/productos',                  ctrl.buscarProductos);
+router.get('/productos-lista',            ctrl.listarProductosPorCategoria);
 
 // Rutas Privadas (Admin Panel)
 router.use('/departamentos',              authAdmin);
@@ -107,6 +108,8 @@ router.put('/admin/config/:depId',        ctrl.actualizarConfig);
 router.post('/admin/csv-upload',          upload.single('file'), ctrl.subirCSV);
 router.get('/admin/productos/:plu',       ctrl.obtenerProducto);
 router.put('/admin/productos/:plu',       ctrl.actualizarProducto);
+router.get('/admin/clasificacion',        ctrl.listarClasificacion);
+router.post('/admin/clasificacion/bulk',  ctrl.clasificarBulk);
 router.get('/admin/export',               ctrl.exportarExcel);
 
 // Master Panel de Productos

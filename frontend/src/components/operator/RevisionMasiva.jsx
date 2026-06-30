@@ -8,9 +8,10 @@ export default function RevisionMasiva({ revisionId, esProductivo = true }) {
   const [guardando, setGuardando] = useState({}) // track save status per PLU
   const items = useAppStore(s => s.items)
   const addItem = useAppStore(s => s.addItem)
+  const categoria = useAppStore(s => s.categoria)
 
   useEffect(() => {
-    obtenerTodosRevision(revisionId)
+    obtenerTodosRevision(revisionId, categoria)
       .then(res => {
         // Initialize state for each product based on existing items
         const initProds = res.map(p => {

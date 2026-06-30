@@ -8,12 +8,9 @@ import NoEscaneadosModal from '../components/operator/NoEscaneadosModal'
 import RevisionMasiva from '../components/operator/RevisionMasiva'
 import Swal from 'sweetalert2'
 
-const AREAS_PRODUCTIVAS = [22, 1347, 2347];
-
 export default function RevisionPage() {
   const navigate = useNavigate()
-  const { depId, depNombre, usuNombre, revisionId, revFolio, items, addItem, removeItem, clearRevision, reset } = useAppStore()
-  const esProductivo = AREAS_PRODUCTIVAS.includes(Number(depId))
+  const { depId, depNombre, usuNombre, revisionId, revFolio, items, categoria, esProductivo, addItem, removeItem, clearRevision, reset } = useAppStore()
 
   const [query, setQuery]           = useState('')
   const [resultados, setRes]        = useState([])
@@ -45,7 +42,7 @@ export default function RevisionPage() {
     setEscaner(false)
     setQuery(codigo)
     try {
-      const res = await buscarProductos(depId, codigo)
+      const res = await buscarProductos(depId, codigo, categoria)
       if (Array.isArray(res)) {
         if (res.length === 1) {
           seleccionar(res[0])
@@ -65,8 +62,8 @@ export default function RevisionPage() {
     clearTimeout(timerRef.current)
     if (q.length < 1) { setRes([]); return }
     timerRef.current = setTimeout(async () => {
-      try { 
-        const res = await buscarProductos(depId, q)
+      try {
+        const res = await buscarProductos(depId, q, categoria)
         if (Array.isArray(res)) {
           setRes(res)
         }
@@ -150,7 +147,7 @@ export default function RevisionPage() {
 
     if (esNoProductivo) {
       try {
-        const res = await obtenerNoEscaneados(revisionId);
+        const res = await obtenerNoEscaneados(revisionId, categoria);
         const nonScanned = res.filter(p => !items.some(i => i.pro_codigo_plu === p.pro_codigo_plu));
 
         if (nonScanned.length > 0) {
