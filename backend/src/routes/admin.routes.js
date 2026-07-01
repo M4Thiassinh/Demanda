@@ -14,23 +14,34 @@ function tokenValido(recibido, esperado) {
 }
 
 // Rate limiter en memoria para los endpoints de login (mitiga fuerza bruta).
+// Solo cuenta intentos FALLIDOS: un login correcto no gasta cupo y además
+// limpia el contador de esa IP.
 const intentos = new Map(); // ip -> { count, ts }
-const LIMITE = 10;
+const LIMITE = 20;          // intentos fallidos permitidos por ventana
 const VENTANA_MS = 15 * 60 * 1000;
+
+const ipDe = (req) => req.ip || req.connection?.remoteAddress || 'desconocida';
+
+// Middleware: solo BLOQUEA si ya se superaron los intentos fallidos. No incrementa.
 function rateLimitLogin(req, res, next) {
-  const ip = req.ip || req.connection?.remoteAddress || 'desconocida';
-  const ahora = Date.now();
-  const reg = intentos.get(ip);
-  if (!reg || ahora - reg.ts > VENTANA_MS) {
-    intentos.set(ip, { count: 1, ts: ahora });
-    return next();
-  }
-  reg.count += 1;
-  if (reg.count > LIMITE) {
-    return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos.' });
+  const reg = intentos.get(ipDe(req));
+  if (reg && Date.now() - reg.ts <= VENTANA_MS && reg.count >= LIMITE) {
+    return res.status(429).json({ error: 'Demasiados intentos fallidos. Espera unos minutos.' });
   }
   next();
 }
+
+// Se llama SOLO cuando la contraseña es incorrecta.
+function registrarFallo(req) {
+  const ip = ipDe(req);
+  const ahora = Date.now();
+  const reg = intentos.get(ip);
+  if (!reg || ahora - reg.ts > VENTANA_MS) intentos.set(ip, { count: 1, ts: ahora });
+  else reg.count += 1;
+}
+
+// Login correcto: limpia el contador de esa IP.
+const limpiarIntentos = (req) => intentos.delete(ipDe(req));
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -70,8 +81,10 @@ const authMaster = (req, res, next) => {
 router.post('/admin/login', rateLimitLogin, (req, res) => {
   const { password } = req.body;
   if (process.env.ADMIN_PASSWORD && tokenValido(password, process.env.ADMIN_PASSWORD)) {
+    limpiarIntentos(req);
     res.json({ ok: true, token: password });
   } else {
+    registrarFallo(req);
     res.status(401).json({ error: 'Contraseña incorrecta' });
   }
 });
@@ -82,8 +95,10 @@ router.post('/admin/login-master', rateLimitLogin, (req, res) => {
   }
   const { password } = req.body;
   if (tokenValido(password, process.env.MASTER_PASSWORD)) {
+    limpiarIntentos(req);
     res.json({ ok: true, token: password });
   } else {
+    registrarFallo(req);
     res.status(401).json({ error: 'Contraseña maestra incorrecta' });
   }
 });
