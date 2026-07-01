@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import useAppStore from '../store/useAppStore'
 import {
-  getDepartamentos, getUsuarios, getTurnoActual,
+  getUsuarios, getTurnoActual, getDepartamentosInfaltables,
   getChecklistInfaltables, guardarChequeoInfaltables,
   getInfaltablesConfig, updateInfaltablesConfig,
 } from '../api'
@@ -16,13 +16,23 @@ export default function InfaltablesPage() {
   const [departamentos, setDepartamentos] = useState([])
   const [usuSel, setUsuSel] = useState('')
   const [depSel, setDepSel] = useState('')
-  const [tab, setTab]       = useState('chequeo') // chequeo | jornada
+  const [turno, setTurno]   = useState(null)   // 'am' | 'pm' — autoseleccionado por hora Chile
+  const [tab, setTab]       = useState('chequeo') // chequeo | config
 
+  // Usuarios + turno inicial según la hora de Chile
   useEffect(() => {
     getUsuarios().then(setUsuarios).catch(() => {})
-    // Solo departamentos marcados como infaltables (dep_infaltable = 1)
-    getDepartamentos({ infaltable: true }).then(setDepartamentos).catch(() => {})
+    getTurnoActual().then((d) => setTurno(d.turno)).catch(() => setTurno('am'))
   }, [])
+
+  // Al cambiar el turno: recargar departamentos de ese turno y resetear la selección
+  useEffect(() => {
+    if (!turno) return
+    setDepSel('')
+    getDepartamentosInfaltables(turno)
+      .then((d) => setDepartamentos(d.departamentos || []))
+      .catch(() => setDepartamentos([]))
+  }, [turno])
 
   const listo = usuSel && depSel
   const depNombre = departamentos.find((d) => String(d.dep_id) === String(depSel))?.dep_nombre
@@ -38,7 +48,25 @@ export default function InfaltablesPage() {
       </header>
 
       <div className="p-4 space-y-4">
-        {/* Selección de identidad + depto */}
+        {/* Turno (autoseleccionado por hora, filtra los departamentos) */}
+        <div className="card p-4">
+          <label className="label">Turno</label>
+          <div className="flex gap-2">
+            {['am', 'pm'].map((t) => (
+              <button key={t} onClick={() => setTurno(t)}
+                className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+                  turno === t
+                    ? 'bg-brand-600 border-brand-500 text-white'
+                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+                }`}>
+                {t.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <p className="text-gray-500 text-xs mt-2">Se selecciona automáticamente según la hora de Chile. Solo se muestran los departamentos del turno.</p>
+        </div>
+
+        {/* Selección de identidad + depto (filtrado por turno) */}
         <div className="card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Tu nombre</label>
@@ -48,11 +76,14 @@ export default function InfaltablesPage() {
             </select>
           </div>
           <div>
-            <label className="label">Departamento</label>
+            <label className="label">Departamento ({turno ? turno.toUpperCase() : '—'})</label>
             <select value={depSel} onChange={(e) => setDepSel(e.target.value)} className="input-field">
               <option value="">— Seleccionar —</option>
               {departamentos.map((d) => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
             </select>
+            {turno && departamentos.length === 0 && (
+              <p className="text-gray-500 text-xs mt-1">No hay departamentos con infaltables en el turno {turno.toUpperCase()}.</p>
+            )}
           </div>
         </div>
 
@@ -70,7 +101,7 @@ export default function InfaltablesPage() {
               ))}
             </div>
 
-            {tab === 'chequeo'   && <Chequeo depSel={depSel} usuSel={usuSel} />}
+            {tab === 'chequeo'   && <Chequeo depSel={depSel} usuSel={usuSel} turno={turno} />}
             {tab === 'config'    && <Config depSel={depSel} depNombre={depNombre} />}
           </>
         )}
@@ -80,22 +111,21 @@ export default function InfaltablesPage() {
 }
 
 /* ── Pestaña: Chequeo de infaltables ─────────────────────────── */
-function Chequeo({ depSel, usuSel }) {
-  const [turno, setTurno]       = useState(null)
+function Chequeo({ depSel, usuSel, turno }) {
   const [productos, setProductos] = useState([])
   const [ausentes, setAusentes] = useState(new Set()) // PLUs marcados como AUSENTES (por defecto todos presentes)
   const [loading, setLoading]   = useState(false)
   const [saving, setSaving]     = useState(false)
 
-  const cargar = (turnoForzado) => {
+  const cargar = () => {
     setLoading(true)
-    getChecklistInfaltables(depSel, turnoForzado)
-      .then((data) => { setTurno(data.turno); setProductos(data.productos); setAusentes(new Set()) })
+    getChecklistInfaltables(depSel, turno)
+      .then((data) => { setProductos(data.productos); setAusentes(new Set()) })
       .catch(() => Swal.fire('Error', 'No se pudo cargar el checklist', 'error'))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { cargar() }, [depSel])
+  useEffect(() => { cargar() }, [depSel, turno])
 
   const toggleAusente = (plu) => setAusentes((prev) => {
     const next = new Set(prev)
@@ -130,7 +160,7 @@ function Chequeo({ depSel, usuSel }) {
         text: `Índice faltante: ${r.indice_faltante}% · ${r.correoEnviado ? 'Correo enviado ✅' : 'Correo no enviado ⚠️'}`,
         timer: 2500, showConfirmButton: false,
       })
-      cargar(turno)
+      cargar()
     } catch (e) {
       Swal.fire('Error', e?.response?.data?.error || 'No se pudo guardar', 'error')
     } finally { setSaving(false) }
@@ -140,19 +170,9 @@ function Chequeo({ depSel, usuSel }) {
 
   return (
     <div className="space-y-3">
-      {/* Barra de turno + KPIs */}
+      {/* KPIs del turno */}
       <div className="card p-3 flex flex-wrap items-center gap-3">
-        <span className="text-gray-400 text-sm">Turno:</span>
-        <div className="flex gap-1">
-          {['am', 'pm'].map((t) => (
-            <button key={t} onClick={() => cargar(t)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
-                turno === t ? 'bg-brand-600 border-brand-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400'
-              }`}>
-              {t.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <span className="text-gray-400 text-sm">Turno <b className="text-white">{turno?.toUpperCase()}</b></span>
         <div className="ml-auto flex items-center gap-3 text-sm">
           <span className="text-gray-400">{total} infaltables</span>
           <span className="text-rose-400 font-bold">{faltantes} faltan</span>

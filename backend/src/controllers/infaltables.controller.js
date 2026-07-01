@@ -37,6 +37,28 @@ function obtenerTurnoActual(_req, res) {
   res.json({ turno: turnoActual() });
 }
 
+// GET /api/infaltables/departamentos?turno=am|pm
+// Departamentos que tienen al menos un producto infaltable con esa jornada.
+async function listarDepartamentosTurno(req, res) {
+  try {
+    const turno = (req.query.turno === 'am' || req.query.turno === 'pm') ? req.query.turno : turnoActual();
+    const { rows } = await db.query(
+      `SELECT DISTINCT d.dep_id, d.dep_nombre
+         FROM departamentos d
+         JOIN productos p ON p.dep_id = d.dep_id
+        WHERE d.dep_infaltable = 1
+          AND p.pro_infaltable = 1
+          AND p.pro_jornada = ?
+        ORDER BY d.dep_nombre`,
+      [turno]
+    );
+    res.json({ turno, departamentos: rows });
+  } catch (err) {
+    console.error('[listarDepartamentosTurno]', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar los departamentos' });
+  }
+}
+
 // GET /api/infaltables/jornada?dep_id=22  → productos NORMALES para asignar AM/PM/Ambos
 async function listarParaJornada(req, res) {
   try {
@@ -296,6 +318,6 @@ async function actualizarConfig(req, res) {
 }
 
 module.exports = {
-  obtenerTurnoActual, listarParaJornada, asignarJornadaBulk, obtenerChecklist, guardarChequeo,
-  obtenerDashboard, obtenerConfig, actualizarConfig,
+  obtenerTurnoActual, listarDepartamentosTurno, listarParaJornada, asignarJornadaBulk,
+  obtenerChecklist, guardarChequeo, obtenerDashboard, obtenerConfig, actualizarConfig,
 };
