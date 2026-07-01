@@ -4,7 +4,7 @@ import Swal from 'sweetalert2'
 import useAppStore from '../store/useAppStore'
 import {
   getUsuarios, getTurnoActual, getDepartamentosInfaltables,
-  getChecklistInfaltables, guardarChequeoInfaltables,
+  getChecklistInfaltables, guardarChequeoInfaltables, enviarReporteTurnoInfaltables,
   getInfaltablesConfig, updateInfaltablesConfig,
 } from '../api'
 
@@ -18,6 +18,7 @@ export default function InfaltablesPage() {
   const [depSel, setDepSel] = useState('')
   const [turno, setTurno]   = useState(null)   // 'am' | 'pm' — autoseleccionado por hora Chile
   const [tab, setTab]       = useState('chequeo') // chequeo | config
+  const [enviando, setEnviando] = useState(false)
 
   // Usuarios + turno inicial según la hora de Chile
   useEffect(() => {
@@ -36,6 +37,27 @@ export default function InfaltablesPage() {
 
   const listo = usuSel && depSel
   const depNombre = departamentos.find((d) => String(d.dep_id) === String(depSel))?.dep_nombre
+
+  const enviarReporte = async () => {
+    if (!turno) return
+    setEnviando(true)
+    try {
+      const r = await enviarReporteTurnoInfaltables(turno, usuSel || undefined)
+      if (r.enviado) {
+        Swal.fire({
+          icon: 'success', title: 'Reporte enviado',
+          text: `Turno ${turno.toUpperCase()} · ${r.departamentos_chequeados} depto(s) · ${r.destinatarios?.length || 0} destinatario(s)`,
+          timer: 2800, showConfirmButton: false,
+        })
+      } else {
+        Swal.fire('No se envió', r.motivo === 'sin destinatario'
+          ? 'No hay correos configurados para los departamentos de este turno.'
+          : 'No se pudo enviar el correo.', 'warning')
+      }
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo enviar el reporte', 'error')
+    } finally { setEnviando(false) }
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 max-w-2xl mx-auto">
@@ -105,6 +127,19 @@ export default function InfaltablesPage() {
             {tab === 'config'    && <Config depSel={depSel} depNombre={depNombre} />}
           </>
         )}
+
+        {/* Reporte consolidado: UN solo correo por turno con el gráfico de todos los deptos */}
+        {turno && departamentos.length > 0 && (
+          <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white font-semibold text-sm">📧 Reporte del turno {turno.toUpperCase()}</p>
+              <p className="text-gray-500 text-xs">Un solo correo con el gráfico de todos los departamentos {turno.toUpperCase()} y el Excel de faltantes por depto.</p>
+            </div>
+            <button onClick={enviarReporte} disabled={enviando} className="btn-primary shrink-0">
+              {enviando ? 'Enviando…' : 'Enviar reporte'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -140,7 +175,7 @@ function Chequeo({ depSel, usuSel, turno }) {
   const finalizar = async () => {
     if (!total) return
     const res = await Swal.fire({
-      title: '¿Finalizar chequeo?',
+      title: '¿Guardar infaltables?',
       html: `Turno <b>${turno?.toUpperCase()}</b> · ${total} infaltables · <b>${faltantes} faltante(s)</b> · Índice ${indice}%`,
       icon: 'question', background: '#111827', color: '#fff',
       showCancelButton: true, confirmButtonText: 'Guardar', cancelButtonText: 'Cancelar',
@@ -157,7 +192,7 @@ function Chequeo({ depSel, usuSel, turno }) {
       const r = await guardarChequeoInfaltables({ dep_id: depSel, usu_id: usuSel, turno, items })
       Swal.fire({
         icon: 'success', title: 'Chequeo guardado',
-        text: `Índice faltante: ${r.indice_faltante}% · ${r.correoEnviado ? 'Correo enviado ✅' : 'Correo no enviado ⚠️'}`,
+        text: `Índice faltante: ${r.indice_faltante}% · Usa "Enviar reporte" al terminar el turno`,
         timer: 2500, showConfirmButton: false,
       })
       cargar()
@@ -218,7 +253,7 @@ function Chequeo({ depSel, usuSel, turno }) {
 
       {total > 0 && (
         <button onClick={finalizar} disabled={saving} className="btn-primary w-full">
-          {saving ? 'Guardando…' : `Finalizar chequeo (${faltantes} faltante${faltantes === 1 ? '' : 's'})`}
+          {saving ? 'Guardando…' : `Guardar infaltables (${faltantes} faltante${faltantes === 1 ? '' : 's'})`}
         </button>
       )}
     </div>

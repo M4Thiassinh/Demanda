@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const { enviarReporteInfaltables } = require('../services/EmailService');
+const { enviarReporteTurnoInfaltables } = require('../services/EmailService');
 
 const JORNADAS = ['am', 'pm', 'ambos'];
 
@@ -184,51 +184,11 @@ async function guardarChequeo(req, res) {
     connection.release();
     connection = null; // ya liberada; evita doble release en finally
 
-    // Enviar correo SIEMPRE al finalizar (sin bloquear la respuesta si el SMTP falla)
-    let correoEnviado = false;
-    try {
-      const { rows: cab } = await db.query(
-        `SELECT d.dep_nombre,
-                COALESCE(c.meta_faltante, 15) AS meta,
-                c.correos_destino,
-                (SELECT usu_nombre FROM usuarios WHERE usu_id = ?) AS usu_nombre
-           FROM departamentos d
-           LEFT JOIN infaltables_config c ON c.dep_id = d.dep_id
-          WHERE d.dep_id = ?`,
-        [usu_id || null, dep_id]
-      );
-      const info = cab[0] || {};
-      const { rows: prods } = await db.query(
-        `SELECT d.pro_codigo_plu, p.pro_nombre_producto, d.presente, d.stock_referencia
-           FROM chequeo_infaltables_detalle d
-           JOIN productos p ON p.pro_codigo_plu = d.pro_codigo_plu AND p.dep_id = ?
-          WHERE d.chk_id = ?
-          ORDER BY d.presente ASC, p.pro_nombre_producto`,
-        [dep_id, chkId]
-      );
-      let dashboard = [];
-      try { dashboard = await dashboardData(); } catch (_) {}
-
-      const r = await enviarReporteInfaltables({
-        depNombre: info.dep_nombre || dep_id,
-        correosDestino: info.correos_destino,
-        usuNombre: info.usu_nombre,
-        turno: turnoOk,
-        fecha: new Date(),
-        meta: Number(info.meta),
-        indice,
-        productos: prods.map((p) => ({ ...p, presente: !!p.presente })),
-        dashboard,
-      });
-      correoEnviado = !!r.enviado;
-    } catch (mailErr) {
-      console.error('[guardarChequeo] correo:', mailErr.message);
-    }
-
+    // El correo ya NO se envía aquí: cada chequeo solo se guarda. El reporte
+    // consolidado del turno se manda con POST /reporte-turno (un solo correo).
     res.status(201).json({
       ok: true, chk_id: chkId, turno: turnoOk,
       total_infaltables: total, total_faltantes: faltantes, indice_faltante: indice,
-      correoEnviado,
     });
   } catch (err) {
     if (connection) { try { await connection.rollback(); } catch (_) {} }
@@ -272,6 +232,95 @@ async function obtenerDashboard(_req, res) {
   } catch (err) {
     console.error('[obtenerDashboard]', err.message);
     res.status(500).json({ error: 'No se pudo cargar el dashboard' });
+  }
+}
+
+// POST /api/infaltables/reporte-turno  → { turno, usu_id }
+// Envía UN solo correo del turno: gráfico con TODOS los departamentos de la
+// jornada + Excel con los productos (faltantes/OK) de cada depto chequeado hoy.
+async function enviarReporteTurno(req, res) {
+  const turno = (req.body.turno === 'am' || req.body.turno === 'pm') ? req.body.turno : turnoActual();
+  const usu_id = req.body.usu_id || null;
+  try {
+    // Departamentos infaltables de la jornada + su último chequeo de HOY para ese turno
+    const { rows: deps } = await db.query(
+      `SELECT d.dep_id, d.dep_nombre,
+              COALESCE(c.meta_faltante, 15) AS meta,
+              ci.chk_id, ci.indice_faltante, ci.chk_fecha
+         FROM departamentos d
+         LEFT JOIN infaltables_config c ON c.dep_id = d.dep_id
+         LEFT JOIN chequeo_infaltables ci ON ci.chk_id = (
+            SELECT x.chk_id FROM chequeo_infaltables x
+             WHERE x.dep_id = d.dep_id AND x.turno = ? AND x.chk_fecha >= CURDATE()
+             ORDER BY x.chk_fecha DESC, x.chk_id DESC LIMIT 1
+         )
+        WHERE d.dep_infaltable = 1
+          AND EXISTS (SELECT 1 FROM productos p
+                       WHERE p.dep_id = d.dep_id AND p.pro_infaltable = 1 AND p.pro_jornada = ?)
+        ORDER BY d.dep_nombre`,
+      [turno, turno]
+    );
+
+    if (!deps.length) return res.status(400).json({ error: `No hay departamentos infaltables en el turno ${turno.toUpperCase()}` });
+    const chequeados = deps.filter((d) => d.chk_id);
+    if (!chequeados.length) return res.status(400).json({ error: `Aún no se ha chequeado ningún departamento del turno ${turno.toUpperCase()} hoy` });
+
+    // Productos de cada departamento chequeado
+    const departamentos = [];
+    for (const d of chequeados) {
+      const { rows: prods } = await db.query(
+        `SELECT det.pro_codigo_plu, p.pro_nombre_producto, det.presente, det.stock_referencia
+           FROM chequeo_infaltables_detalle det
+           JOIN productos p ON p.pro_codigo_plu = det.pro_codigo_plu AND p.dep_id = ?
+          WHERE det.chk_id = ?
+          ORDER BY det.presente ASC, p.pro_nombre_producto`,
+        [d.dep_id, d.chk_id]
+      );
+      departamentos.push({
+        dep_nombre: d.dep_nombre,
+        meta: Number(d.meta),
+        indice: d.indice_faltante != null ? Number(d.indice_faltante) : null,
+        productos: prods.map((p) => ({ ...p, presente: !!p.presente })),
+      });
+    }
+
+    // Gráfico: TODOS los departamentos de la jornada (los no chequeados van sin dato)
+    const dashboard = deps.map((d) => ({
+      dep_nombre: d.dep_nombre,
+      real: d.indice_faltante != null ? Number(d.indice_faltante) : null,
+      meta: Number(d.meta),
+    }));
+
+    // Destinatarios: unión de los correos configurados de los departamentos de la jornada
+    const ph = deps.map(() => '?').join(',');
+    const { rows: correosRows } = await db.query(
+      `SELECT correos_destino FROM infaltables_config WHERE dep_id IN (${ph})`,
+      deps.map((d) => d.dep_id)
+    );
+    const set = new Set();
+    correosRows.forEach((r) => (r.correos_destino || '')
+      .split(/[,;]/).map((e) => e.trim()).filter(Boolean).forEach((e) => set.add(e)));
+    const correos = set.size ? [...set].join(', ') : null;
+
+    // Responsable
+    let usuNombre = null;
+    if (usu_id) {
+      const { rows } = await db.query(`SELECT usu_nombre FROM usuarios WHERE usu_id = ?`, [usu_id]);
+      usuNombre = rows[0]?.usu_nombre || null;
+    }
+
+    const r = await enviarReporteTurnoInfaltables({
+      turno, fecha: new Date(), usuNombre, correosDestino: correos, departamentos, dashboard,
+    });
+
+    res.json({
+      ok: true, enviado: !!r.enviado, motivo: r.motivo,
+      turno, departamentos_chequeados: chequeados.length, departamentos_turno: deps.length,
+      destinatarios: [...set],
+    });
+  } catch (err) {
+    console.error('[enviarReporteTurno]', err.message);
+    res.status(500).json({ error: 'No se pudo enviar el reporte del turno' });
   }
 }
 
@@ -319,5 +368,6 @@ async function actualizarConfig(req, res) {
 
 module.exports = {
   obtenerTurnoActual, listarDepartamentosTurno, listarParaJornada, asignarJornadaBulk,
-  obtenerChecklist, guardarChequeo, obtenerDashboard, obtenerConfig, actualizarConfig,
+  obtenerChecklist, guardarChequeo, obtenerDashboard, enviarReporteTurno,
+  obtenerConfig, actualizarConfig,
 };

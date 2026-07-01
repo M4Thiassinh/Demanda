@@ -9,6 +9,7 @@ router.get('/jornada',        ctrl.listarParaJornada);
 router.post('/jornada/bulk',  ctrl.asignarJornadaBulk);
 router.get('/checklist',      ctrl.obtenerChecklist);
 router.post('/chequeo',       ctrl.guardarChequeo);
+router.post('/reporte-turno', ctrl.enviarReporteTurno);
 router.get('/dashboard',      ctrl.obtenerDashboard);
 router.get('/config',         ctrl.obtenerConfig);
 router.put('/config/:depId',  ctrl.actualizarConfig);

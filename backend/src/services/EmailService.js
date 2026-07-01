@@ -474,4 +474,138 @@ async function enviarReporteInfaltables({ depNombre, correosDestino, usuNombre, 
   return { enviado: true };
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables };
+/** Excel consolidado del turno: una fila por producto, con columna Departamento. */
+async function generarExcelInfaltablesTurno(departamentos, turno, fecha) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Infaltables');
+
+  ws.columns = [
+    { header: 'Departamento', key: 'dep',    width: 24 },
+    { header: 'Turno',        key: 'turno',  width: 8 },
+    { header: 'Fecha',        key: 'fecha',  width: 22 },
+    { header: 'PLU',          key: 'plu',    width: 12 },
+    { header: 'Producto',     key: 'nombre', width: 40 },
+    { header: 'Estado',       key: 'estado', width: 12 },
+    { header: 'Stock Sistema',key: 'stock',  width: 14 },
+  ];
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB91C1C' } };
+    cell.alignment = { horizontal: 'center' };
+  });
+
+  const fechaStr = new Date(fecha).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
+
+  for (const dep of departamentos) {
+    for (const p of (dep.productos || [])) {
+      const falta = !p.presente;
+      const row = ws.addRow({
+        dep: dep.dep_nombre,
+        turno: String(turno).toUpperCase(),
+        fecha: fechaStr,
+        plu: p.pro_codigo_plu,
+        nombre: p.pro_nombre_producto,
+        estado: falta ? 'FALTA' : 'OK',
+        stock: p.stock_referencia != null ? Number(p.stock_referencia) : 's/d',
+      });
+      if (falta) {
+        row.getCell('estado').font = { bold: true, color: { argb: 'FFB91C1C' } };
+        row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; });
+      }
+    }
+  }
+
+  return wb.xlsx.writeBuffer();
+}
+
+/**
+ * Envía UN solo correo consolidado del turno.
+ * departamentos: [{ dep_nombre, meta, indice, productos:[{...presente}] }] (chequeados)
+ * dashboard:     [{ dep_nombre, real, meta }] (TODOS los deptos de la jornada, para el gráfico)
+ */
+async function enviarReporteTurnoInfaltables({ turno, fecha, usuNombre, correosDestino, departamentos, dashboard }) {
+  const destinatario = correosDestino || process.env.EMAIL_PRODUCCION;
+  if (!destinatario) return { enviado: false, motivo: 'sin destinatario' };
+
+  const fechaStr = new Date(fecha).toLocaleString('es-CL', {
+    timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short', hour12: false,
+  });
+
+  const grafico = graficoDashboardHTML(dashboard);
+  const totalFaltantes = departamentos.reduce((s, d) => s + (d.productos || []).filter((p) => !p.presente).length, 0);
+
+  // Una sección por departamento chequeado, con su índice y sus faltantes.
+  const secciones = departamentos.map((dep) => {
+    const productos = dep.productos || [];
+    const faltantes = productos.filter((p) => !p.presente);
+    const sobreMeta = dep.indice != null && Number(dep.indice) > Number(dep.meta);
+    const colorIndice = sobreMeta ? '#b91c1c' : '#15803d';
+    const filas = faltantes.length
+      ? faltantes.map((p) => `
+        <tr>
+          <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${esc(p.pro_codigo_plu)}</td>
+          <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;">${esc(p.pro_nombre_producto)}</td>
+          <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#b91c1c;font-weight:700;">${esc(p.stock_referencia != null ? Number(p.stock_referencia) : 's/d')}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="3" style="padding:12px;text-align:center;color:#15803d;font-weight:700;">✓ Sin faltantes</td></tr>`;
+    return `
+      <div style="margin:0 0 22px;">
+        <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#1e293b;">${esc(dep.dep_nombre)}</p>
+        <p style="margin:0 0 8px;font-size:13px;color:#334155;">
+          <b>${productos.length}</b> infaltables · <b style="color:#b91c1c;">${faltantes.length}</b> faltante(s) ·
+          Índice: <b style="color:${colorIndice};">${dep.indice != null ? dep.indice + '%' : 's/d'}</b> (meta ${dep.meta}%)
+          ${sobreMeta ? '⚠️ sobre la meta' : '✓ dentro de meta'}
+        </p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+          <thead><tr style="background:#1e293b;color:#fff;">
+            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
+            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto faltante</th>
+            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Stock Sist.</th>
+          </tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;"><tr><td align="center">
+  <table width="680" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <tr><td style="background:linear-gradient(135deg,#b91c1c,#ef4444);padding:24px 28px;color:#fff;">
+      <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:2px;opacity:.85;">Teja Market — Control de Infaltables</p>
+      <h1 style="margin:6px 0 0;font-size:22px;">🎯 Reporte de Infaltables — Turno ${esc(String(turno).toUpperCase())}</h1>
+    </td></tr>
+    <tr><td style="padding:18px 28px;background:#fef2f2;border-bottom:1px solid #fecaca;">
+      <p style="margin:0;font-size:13px;color:#7f1d1d;">
+        <b>Turno:</b> ${esc(String(turno).toUpperCase())} &nbsp;|&nbsp;
+        <b>Departamentos:</b> ${departamentos.length} &nbsp;|&nbsp;
+        <b>Total faltantes:</b> ${totalFaltantes} &nbsp;|&nbsp;
+        <b>Responsable:</b> ${esc(usuNombre || '—')} &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
+      </p>
+    </td></tr>
+    <tr><td style="padding:20px 28px;">
+      ${grafico}
+      ${secciones}
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;text-align:center;font-size:11px;color:#94a3b8;">
+      Generado automáticamente — ${esc(fechaStr)}
+    </td></tr>
+  </table></td></tr></table></body></html>`;
+
+  const excelBuffer = await generarExcelInfaltablesTurno(departamentos, turno, fecha);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to:   destinatario,
+    subject: `[Infaltables] Turno ${String(turno).toUpperCase()} — ${departamentos.length} depto(s) — ${totalFaltantes} faltante(s)`,
+    html,
+    attachments: [{
+      filename: `infaltables_turno_${turno}.xlsx`,
+      content: excelBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }],
+  });
+
+  return { enviado: true };
+}
+
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno };

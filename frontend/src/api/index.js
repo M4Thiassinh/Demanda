@@ -83,6 +83,7 @@ export const getTurnoActual = () => api.get('/infaltables/turno-actual').then(r 
 export const getDepartamentosInfaltables = (turno) => api.get('/infaltables/departamentos', { params: { turno } }).then(r => r.data)
 export const getChecklistInfaltables = (depId, turno) => api.get('/infaltables/checklist', { params: { dep_id: depId, turno } }).then(r => r.data)
 export const guardarChequeoInfaltables = (data) => api.post('/infaltables/chequeo', data).then(r => r.data)
+export const enviarReporteTurnoInfaltables = (turno, usu_id) => api.post('/infaltables/reporte-turno', { turno, usu_id }).then(r => r.data)
 export const getInfaltablesDashboard = () => api.get('/infaltables/dashboard').then(r => r.data)
 export const getInfaltablesConfig = (depId) => api.get('/infaltables/config', { params: { dep_id: depId } }).then(r => r.data)
 export const updateInfaltablesConfig = (depId, data) => api.put(`/infaltables/config/${depId}`, data).then(r => r.data)
