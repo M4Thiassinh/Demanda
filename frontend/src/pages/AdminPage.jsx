@@ -667,6 +667,7 @@ export default function AdminPage() {
   // Lógica de Autenticación
   const [auth, setAuth] = useState(localStorage.getItem('adminToken') !== null)
   const [pass, setPass] = useState('')
+  const [showPass, setShowPass] = useState(false)
   const [authErr, setAuthErr] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -705,8 +706,16 @@ export default function AdminPage() {
             <p className="text-gray-500 text-sm mt-1">Acceso Restringido</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input type="password" value={pass} onChange={e => setPass(e.target.value)}
-              placeholder="Contraseña..." autoFocus className="input-field text-center py-3 text-lg tracking-widest" />
+            <div className="relative">
+              <input type={showPass ? 'text' : 'password'} value={pass} onChange={e => setPass(e.target.value)}
+                placeholder="Contraseña..." autoFocus
+                className="input-field text-center py-3 text-lg tracking-widest text-white pr-12" />
+              <button type="button" onClick={() => setShowPass(v => !v)}
+                aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white text-xl leading-none">
+                {showPass ? '🙈' : '👁️'}
+              </button>
+            </div>
             {authErr && <p className="text-rose-400 text-sm text-center font-medium animate-fade-in">{authErr}</p>}
             <button type="submit" disabled={loading || !pass} className="btn-primary w-full py-3 disabled:opacity-50">
               {loading ? 'Verificando...' : 'Entrar'}

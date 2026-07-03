@@ -17,7 +17,7 @@ function tokenValido(recibido, esperado) {
 // Solo cuenta intentos FALLIDOS: un login correcto no gasta cupo y además
 // limpia el contador de esa IP.
 const intentos = new Map(); // ip -> { count, ts }
-const LIMITE = 20;          // intentos fallidos permitidos por ventana
+const LIMITE = 50;          // intentos fallidos permitidos por ventana
 const VENTANA_MS = 15 * 60 * 1000;
 
 const ipDe = (req) => req.ip || req.connection?.remoteAddress || 'desconocida';

@@ -6,6 +6,7 @@ export default function MasterAdminPanel() {
   // Autenticación Master
   const [isAuth, setIsAuth] = useState(localStorage.getItem('masterToken') !== null);
   const [pass, setPass] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [authErr, setAuthErr] = useState('');
 
   const [departamentos, setDepartamentos] = useState([]);
@@ -268,14 +269,21 @@ export default function MasterAdminPanel() {
         <p className="text-gray-400 text-sm text-center mb-6">Ingresa la clave maestra para acceder a esta sección.</p>
         
         <form onSubmit={handleLoginMaster} className="w-full space-y-4">
-          <input 
-            type="password" 
-            value={pass} 
-            onChange={e => setPass(e.target.value)} 
-            placeholder="Clave Maestra..." 
-            className="input-field text-center py-3 tracking-widest"
-            autoFocus
-          />
+          <div className="relative">
+            <input
+              type={showPass ? 'text' : 'password'}
+              value={pass}
+              onChange={e => setPass(e.target.value)}
+              placeholder="Clave Maestra..."
+              className="input-field text-center py-3 tracking-widest text-white pr-12"
+              autoFocus
+            />
+            <button type="button" onClick={() => setShowPass(v => !v)}
+              aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white text-xl leading-none">
+              {showPass ? '🙈' : '👁️'}
+            </button>
+          </div>
           {authErr && <p className="text-rose-400 text-sm text-center font-medium animate-fade-in">{authErr}</p>}
           <button type="submit" disabled={loading || !pass} className="btn-primary w-full bg-rose-700 hover:bg-rose-600 border-none py-3">
             {loading ? 'Verificando...' : 'Desbloquear Panel'}
