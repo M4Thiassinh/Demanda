@@ -155,7 +155,16 @@ function Chequeo({ depSel, usuSel, turno }) {
   const cargar = () => {
     setLoading(true)
     getChecklistInfaltables(depSel, turno)
-      .then((data) => { setProductos(data.productos); setAusentes(new Set()) })
+      .then((data) => {
+        // Ordenar de mayor a menor por venta diaria (los sin dato al final)
+        const ordenados = [...(data.productos || [])].sort((a, b) => {
+          const va = a.vta_diaria != null ? Number(a.vta_diaria) : -Infinity
+          const vb = b.vta_diaria != null ? Number(b.vta_diaria) : -Infinity
+          return vb - va
+        })
+        setProductos(ordenados)
+        setAusentes(new Set())
+      })
       .catch(() => Swal.fire('Error', 'No se pudo cargar el checklist', 'error'))
       .finally(() => setLoading(false))
   }
@@ -229,13 +238,21 @@ function Chequeo({ depSel, usuSel, turno }) {
               <div key={p.pro_codigo_plu} className={`p-3 flex items-center gap-3 ${ausente ? 'bg-rose-900/20' : ''}`}>
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">{p.pro_nombre_producto}</p>
-                  <p className="text-gray-500 text-xs font-mono">
-                    PLU {p.pro_codigo_plu} · {p.pro_jornada.toUpperCase()} · Vta diaria:{' '}
-                    <span className="text-emerald-300">{p.vta_diaria != null ? p.vta_diaria : 's/d'}</span> · Stock sistema:{' '}
-                    <span className={stock != null && Number(stock) <= 0 ? 'text-rose-400' : 'text-sky-300'}>
-                      {stock != null ? Number(stock) : 's/d'}
-                    </span>
+                  <p className="text-gray-500 text-xs font-mono mb-1.5">
+                    PLU {p.pro_codigo_plu} · {p.pro_jornada.toUpperCase()}
                   </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-baseline gap-1 px-2 py-1 rounded-lg bg-emerald-900/30 border border-emerald-800/50">
+                      <span className="text-emerald-500/70 text-[10px] uppercase tracking-wide">Vta diaria</span>
+                      <span className="text-emerald-300 text-base font-bold">{p.vta_diaria != null ? p.vta_diaria : 's/d'}</span>
+                    </span>
+                    <span className="inline-flex items-baseline gap-1 px-2 py-1 rounded-lg bg-sky-900/30 border border-sky-800/50">
+                      <span className="text-sky-500/70 text-[10px] uppercase tracking-wide">Stock</span>
+                      <span className={`text-base font-bold ${stock != null && Number(stock) <= 0 ? 'text-rose-400' : 'text-sky-300'}`}>
+                        {stock != null ? Number(stock) : 's/d'}
+                      </span>
+                    </span>
+                  </div>
                 </div>
                 <button onClick={() => toggleAusente(p.pro_codigo_plu)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold border shrink-0 ${
