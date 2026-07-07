@@ -618,6 +618,7 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
     { header: 'Producto', key: 'nombre', width: 42 },
     { header: 'Tienda',   key: 'tienda', width: 12 },
     { header: 'Local',    key: 'local',  width: 12 },
+    { header: 'Total',    key: 'total',  width: 12 },
   ];
 
   ws.getRow(1).eachCell((cell) => {
@@ -632,10 +633,13 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
       nombre: f.nombre,
       tienda: f.tienda || 0,
       local:  f.local || 0,
+      total:  (f.tienda || 0) + (f.local || 0),
     });
     row.getCell('plu').alignment    = { horizontal: 'center' };
     row.getCell('tienda').alignment = { horizontal: 'center' };
     row.getCell('local').alignment  = { horizontal: 'center' };
+    row.getCell('total').alignment  = { horizontal: 'center' };
+    row.getCell('total').font       = { bold: true };
     if (i % 2 === 0) {
       row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; });
     }
@@ -679,6 +683,7 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${esc(f.nombre)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#7c3aed;">${esc(f.tienda || 0)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#2563eb;">${esc(f.local || 0)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:800;color:#0f172a;background:#f1f5f9;">${esc((f.tienda || 0) + (f.local || 0))}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
@@ -701,8 +706,9 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Tienda</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Local</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Total</th>
         </tr></thead>
-        <tbody>${filasHTML || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
+        <tbody>${filasHTML || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
       </table>
     </td></tr>
     <tr><td style="padding:16px 28px;background:#f8fafc;text-align:center;font-size:11px;color:#94a3b8;">
