@@ -608,4 +608,123 @@ async function enviarReporteTurnoInfaltables({ turno, fecha, usuNombre, correosD
   return { enviado: true };
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno };
+/** Genera buffer .xlsx — Pedido unido Teja Food (PLU, Producto, Tienda, Local). */
+async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Pedido Teja Food');
+
+  ws.columns = [
+    { header: 'PLU',      key: 'plu',    width: 15 },
+    { header: 'Producto', key: 'nombre', width: 42 },
+    { header: 'Tienda',   key: 'tienda', width: 12 },
+    { header: 'Local',    key: 'local',  width: 12 },
+  ];
+
+  ws.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } }; // violeta
+    cell.alignment = { horizontal: 'center' };
+  });
+
+  filas.forEach((f, i) => {
+    const row = ws.addRow({
+      plu:    f.plu,
+      nombre: f.nombre,
+      tienda: f.tienda || 0,
+      local:  f.local || 0,
+    });
+    row.getCell('plu').alignment    = { horizontal: 'center' };
+    row.getCell('tienda').alignment = { horizontal: 'center' };
+    row.getCell('local').alignment  = { horizontal: 'center' };
+    if (i % 2 === 0) {
+      row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; });
+    }
+  });
+
+  return wb.xlsx.writeBuffer();
+}
+
+/**
+ * Envía UN correo consolidado del departamento Teja Food (Tienda + Local),
+ * combinado por PLU. Se dispara cuando ambos pedidos del día están completos.
+ * items: { tienda: [{pro_codigo_plu, pro_nombre_producto, cantidad}], local: [...] }
+ */
+async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
+  const destinatario = process.env.EMAIL_TEJAFOOD_UNIDO || 'jeanpaulgame@tejamarket.cl';
+
+  const fechaStr = new Date(fecha).toLocaleString('es-CL', {
+    timeZone: 'America/Santiago', dateStyle: 'full', timeStyle: 'short', hour12: false,
+  });
+
+  // Combinar por PLU: { plu, nombre, tienda, local }
+  const mapa = new Map();
+  const acumular = (lista, campo) => {
+    for (const it of (lista || [])) {
+      const plu = String(it.pro_codigo_plu);
+      if (!mapa.has(plu)) mapa.set(plu, { plu, nombre: it.pro_nombre_producto || '', tienda: 0, local: 0 });
+      const reg = mapa.get(plu);
+      if (!reg.nombre && it.pro_nombre_producto) reg.nombre = it.pro_nombre_producto;
+      reg[campo] += Number(it.cantidad) || 0;
+    }
+  };
+  acumular(items.tienda, 'tienda');
+  acumular(items.local, 'local');
+
+  const filas = [...mapa.values()].sort((a, b) =>
+    (a.nombre || '').toLowerCase().localeCompare((b.nombre || '').toLowerCase()));
+
+  const filasHTML = filas.map((f) => `
+    <tr>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${esc(f.plu)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${esc(f.nombre)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#7c3aed;">${esc(f.tienda || 0)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#2563eb;">${esc(f.local || 0)}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;"><tr><td align="center">
+  <table width="660" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <tr><td style="background:linear-gradient(135deg,#7c3aed,#a855f7);padding:24px 28px;color:#fff;">
+      <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:2px;opacity:.85;">Teja Market — Pedido Consolidado</p>
+      <h1 style="margin:6px 0 0;font-size:22px;">🍽️ Correo Unido — Depto Teja Food</h1>
+    </td></tr>
+    <tr><td style="padding:18px 28px;background:#f5f3ff;border-bottom:1px solid #ddd6fe;">
+      <p style="margin:0;font-size:13px;color:#5b21b6;">
+        <b>Tienda + Local combinados</b> &nbsp;|&nbsp; <b>${filas.length}</b> producto(s) &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
+      </p>
+      ${folios ? `<p style="margin:8px 0 0;font-size:12px;color:#6d28d9;"><b>Folios:</b> Tienda ${esc(folios.tienda || '—')} · Local ${esc(folios.local || '—')}</p>` : ''}
+    </td></tr>
+    <tr><td style="padding:20px 28px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <thead><tr style="background:#1e293b;color:#fff;">
+          <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
+          <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Tienda</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Local</th>
+        </tr></thead>
+        <tbody>${filasHTML || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
+      </table>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;text-align:center;font-size:11px;color:#94a3b8;">
+      Generado automáticamente — ${esc(fechaStr)}
+    </td></tr>
+  </table></td></tr></table></body></html>`;
+
+  const excelBuffer = await generarExcelPedidoUnidoTejaFood(filas, fecha);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to:   destinatario,
+    subject: `[Teja Food] Pedido unido Tienda + Local — ${filas.length} producto(s)`,
+    html,
+    attachments: [{
+      filename: `pedido_unido_tejafood.xlsx`,
+      content: excelBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }],
+  });
+
+  return { enviado: true, destinatario, productos: filas.length };
+}
+
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, enviarPedidoUnidoTejaFood };

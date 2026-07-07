@@ -1,7 +1,72 @@
 const db                        = require('../config/db');
 const ConfigService             = require('../services/ConfigService');
 const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalculatorService');
-const { enviarOrdenProduccion } = require('../services/EmailService');
+const { enviarOrdenProduccion, enviarPedidoUnidoTejaFood } = require('../services/EmailService');
+
+// Departamentos Teja Food: cuando AMBOS pedidos del día están completos,
+// se envía un correo unido (Tienda + Local) combinado por PLU.
+const TEJAFOOD_LOCAL  = '1347'; // Local Teja Food
+const TEJAFOOD_TIENDA = '2347'; // Sala / Tienda Teja Food
+
+/**
+ * Si el depto recién finalizado es Teja Food (Local o Tienda) y el OTRO también
+ * tiene un pedido completado hoy, envía el correo unido a Jean Paul.
+ * No lanza: cualquier fallo se registra en log para no afectar el pedido principal.
+ */
+async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
+  const depId = String(depIdFinalizado);
+  if (depId !== TEJAFOOD_LOCAL && depId !== TEJAFOOD_TIENDA) return;
+
+  try {
+    // Última revisión completada HOY de cada depto Teja Food.
+    const { rows } = await db.query(
+      `SELECT r.dep_id, r.rev_id, r.rev_folio, r.rev_fecha
+         FROM revisiones r
+         JOIN (
+           SELECT dep_id, MAX(rev_fecha) AS max_fecha
+             FROM revisiones
+            WHERE rev_estado = 'completada'
+              AND dep_id IN (?, ?)
+              AND DATE(rev_fecha) = CURDATE()
+            GROUP BY dep_id
+         ) ult ON ult.dep_id = r.dep_id AND ult.max_fecha = r.rev_fecha
+        WHERE r.rev_estado = 'completada'`,
+      [TEJAFOOD_LOCAL, TEJAFOOD_TIENDA]
+    );
+
+    const revLocal  = rows.find((r) => String(r.dep_id) === TEJAFOOD_LOCAL);
+    const revTienda = rows.find((r) => String(r.dep_id) === TEJAFOOD_TIENDA);
+
+    // Solo se envía cuando AMBOS pedidos del día están completos.
+    if (!revLocal || !revTienda) return;
+
+    const itemsDe = async (revId, depId) => {
+      const { rows: det } = await db.query(
+        `SELECT dr.pro_codigo_plu, p.pro_nombre_producto, dr.det_cantidad_pedir AS cantidad
+           FROM detalle_revision dr
+           JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = ?
+          WHERE dr.rev_id = ? AND dr.det_cantidad_pedir > 0
+          ORDER BY p.pro_nombre_producto`,
+        [depId, revId]
+      );
+      return det;
+    };
+
+    const [itemsLocal, itemsTienda] = await Promise.all([
+      itemsDe(revLocal.rev_id, TEJAFOOD_LOCAL),
+      itemsDe(revTienda.rev_id, TEJAFOOD_TIENDA),
+    ]);
+
+    const r = await enviarPedidoUnidoTejaFood({
+      fecha: new Date(),
+      items: { local: itemsLocal, tienda: itemsTienda },
+      folios: { local: revLocal.rev_folio, tienda: revTienda.rev_folio },
+    });
+    console.log(`[TejaFood] Correo unido enviado a ${r.destinatario} — ${r.productos} producto(s)`);
+  } catch (err) {
+    console.error('[TejaFood] No se pudo enviar el correo unido:', err.message);
+  }
+}
 
 // Normaliza el filtro de categoría que envía el front según el perfil:
 //   'normal'   → Solicitud Producción Administración
@@ -37,10 +102,14 @@ function generarFolio(depId) {
 async function buscarRevisionActiva(req, res) {
   try {
     const { dep_id, usu_id } = req.query;
+    // Solo reanudar revisiones ABIERTAS DE HOY. Las revisiones en_proceso de
+    // días anteriores quedaron abandonadas: no deben reanudarse (si no, el pedido
+    // se guardaría con la fecha vieja y no contaría como pedido del día).
     const { rows } = await db.query(
       `SELECT rev_id, rev_folio, rev_fecha
          FROM revisiones
         WHERE dep_id = ? AND usu_id = ? AND rev_estado = 'en_proceso'
+          AND DATE(rev_fecha) = CURDATE()
         ORDER BY rev_fecha DESC LIMIT 1`,
       [dep_id, usu_id]
     );
@@ -296,6 +365,10 @@ async function finalizarRevision(req, res) {
         return res.status(502).json({ error: 'No se pudo enviar el correo. La revisión sigue abierta; intenta nuevamente.' });
       }
     }
+
+    // Correo unido Teja Food: si el otro depto del par también está completo hoy.
+    // No bloquea la respuesta ni afecta el pedido si falla.
+    await intentarPedidoUnidoTejaFood(rev.dep_id);
 
     res.json({ ok: true, folio: rev.rev_folio, totalItems: resultados.length, quiebres: quiebres.length, correoEnviado: quiebres.length > 0, detalle: resultados });
   } catch (err) {
