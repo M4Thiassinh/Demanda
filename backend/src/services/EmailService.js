@@ -616,8 +616,8 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
   ws.columns = [
     { header: 'PLU',      key: 'plu',    width: 15 },
     { header: 'Producto', key: 'nombre', width: 42 },
-    { header: 'Tienda',   key: 'tienda', width: 12 },
-    { header: 'Local',    key: 'local',  width: 12 },
+    { header: 'Sala',     key: 'tienda', width: 12 },
+    { header: 'Tienda',   key: 'local',  width: 12 },
     { header: 'Total',    key: 'total',  width: 12 },
   ];
 
@@ -695,17 +695,17 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
     </td></tr>
     <tr><td style="padding:18px 28px;background:#f5f3ff;border-bottom:1px solid #ddd6fe;">
       <p style="margin:0;font-size:13px;color:#5b21b6;">
-        <b>Tienda + Local combinados</b> &nbsp;|&nbsp; <b>${filas.length}</b> producto(s) &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
+        <b>Sala + Tienda combinados</b> &nbsp;|&nbsp; <b>${filas.length}</b> producto(s) &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
       </p>
-      ${folios ? `<p style="margin:8px 0 0;font-size:12px;color:#6d28d9;"><b>Folios:</b> Tienda ${esc(folios.tienda || '—')} · Local ${esc(folios.local || '—')}</p>` : ''}
+      ${folios ? `<p style="margin:8px 0 0;font-size:12px;color:#6d28d9;"><b>Folios:</b> Sala ${esc(folios.tienda || '—')} · Tienda ${esc(folios.local || '—')}</p>` : ''}
     </td></tr>
     <tr><td style="padding:20px 28px;">
       <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <thead><tr style="background:#1e293b;color:#fff;">
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">PLU</th>
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Sala</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Tienda</th>
-          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Local</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Total</th>
         </tr></thead>
         <tbody>${filasHTML || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
@@ -721,7 +721,7 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
     to:   destinatario,
-    subject: `[Teja Food] Pedido unido Tienda + Local — ${filas.length} producto(s)`,
+    subject: `[Teja Food] Pedido unido Sala + Tienda — ${filas.length} producto(s)`,
     html,
     attachments: [{
       filename: `pedido_unido_tejafood.xlsx`,
