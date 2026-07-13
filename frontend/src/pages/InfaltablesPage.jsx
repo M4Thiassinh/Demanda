@@ -5,7 +5,7 @@ import useAppStore from '../store/useAppStore'
 import {
   getUsuarios, getTurnoActual, getDepartamentosInfaltables,
   getChecklistInfaltables, guardarChequeoInfaltables, enviarReporteTurnoInfaltables,
-  getInfaltablesConfig, updateInfaltablesConfig,
+  descargarResumenInfaltables, getInfaltablesConfig, updateInfaltablesConfig,
 } from '../api'
 
 export default function InfaltablesPage() {
@@ -19,6 +19,7 @@ export default function InfaltablesPage() {
   const [turno, setTurno]   = useState(null)   // 'am' | 'pm' — autoseleccionado por hora Chile
   const [tab, setTab]       = useState('chequeo') // chequeo | config
   const [enviando, setEnviando] = useState(false)
+  const [descargando, setDescargando] = useState(false)
 
   // Usuarios + turno inicial según la hora de Chile
   useEffect(() => {
@@ -57,6 +58,20 @@ export default function InfaltablesPage() {
     } catch (e) {
       Swal.fire('Error', e?.response?.data?.error || 'No se pudo enviar el reporte', 'error')
     } finally { setEnviando(false) }
+  }
+
+  const descargarResumen = async () => {
+    if (!turno) return
+    setDescargando(true)
+    try {
+      const res = await descargarResumenInfaltables(turno)
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url; a.download = `resumen_infaltables_${turno}.xlsx`; a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo descargar el resumen', 'error')
+    } finally { setDescargando(false) }
   }
 
   return (
@@ -133,10 +148,23 @@ export default function InfaltablesPage() {
           <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-white font-semibold text-sm">📧 Reporte del turno {turno.toUpperCase()}</p>
-              <p className="text-gray-500 text-xs">Un solo correo con el gráfico de todos los departamentos {turno.toUpperCase()} y el Excel de faltantes por depto.</p>
+              <p className="text-gray-500 text-xs">Un solo correo con el gráfico de todos los departamentos {turno.toUpperCase()}, el Excel de faltantes por depto y la hoja resumen mensual.</p>
             </div>
             <button onClick={enviarReporte} disabled={enviando} className="btn-primary shrink-0">
               {enviando ? 'Enviando…' : 'Enviar reporte'}
+            </button>
+          </div>
+        )}
+
+        {/* Descarga directa de la hoja resumen mensual (mediciones diarias del turno) */}
+        {turno && departamentos.length > 0 && (
+          <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white font-semibold text-sm">📊 Resumen mensual {turno.toUpperCase()}</p>
+              <p className="text-gray-500 text-xs">Descarga el Excel con la matriz de mediciones diarias del mes (día por día, Real / Óptimo / Cumpl%) para el turno {turno.toUpperCase()}.</p>
+            </div>
+            <button onClick={descargarResumen} disabled={descargando} className="btn-secondary shrink-0">
+              {descargando ? 'Generando…' : '⬇ Descargar resumen'}
             </button>
           </div>
         )}

@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const { enviarReporteTurnoInfaltables } = require('../services/EmailService');
+const { enviarReporteTurnoInfaltables, generarExcelResumenInfaltables } = require('../services/EmailService');
 
 const JORNADAS = ['am', 'pm', 'ambos'];
 
@@ -309,8 +309,11 @@ async function enviarReporteTurno(req, res) {
       usuNombre = rows[0]?.usu_nombre || null;
     }
 
+    // Hoja resumen: matriz de mediciones diarias del mes (solo este turno)
+    const resumen = await resumenMensualData(turno);
+
     const r = await enviarReporteTurnoInfaltables({
-      turno, fecha: new Date(), usuNombre, correosDestino: correos, departamentos, dashboard,
+      turno, fecha: new Date(), usuNombre, correosDestino: correos, departamentos, dashboard, resumen,
     });
 
     res.json({
@@ -321,6 +324,82 @@ async function enviarReporteTurno(req, res) {
   } catch (err) {
     console.error('[enviarReporteTurno]', err.message);
     res.status(500).json({ error: 'No se pudo enviar el reporte del turno' });
+  }
+}
+
+// Datos de la hoja resumen mensual (matriz de mediciones diarias por producto),
+// filtrada por turno y acotada al mes en curso HASTA HOY. Reutilizada por el
+// correo del turno y por la descarga del panel.
+async function resumenMensualData(turno) {
+  const turnoOk = (turno === 'am' || turno === 'pm') ? turno : turnoActual();
+
+  // Fecha del servidor (misma referencia que usa el resto: CURDATE()).
+  const { rows: fechaRows } = await db.query(
+    `SELECT DAY(CURDATE()) AS dia, MONTH(CURDATE()) AS mes, YEAR(CURDATE()) AS anio`
+  );
+  const { dia: diasHastaHoy, mes, anio } = fechaRows[0];
+
+  const { rows } = await db.query(
+    `SELECT ci.dep_id, d.dep_nombre,
+            det.pro_codigo_plu, p.pro_nombre_producto, p.pro_codigo_barra,
+            DAY(ci.chk_fecha) AS dia, det.presente
+       FROM chequeo_infaltables ci
+       JOIN chequeo_infaltables_detalle det ON det.chk_id = ci.chk_id
+       JOIN departamentos d ON d.dep_id = ci.dep_id
+       JOIN productos p ON p.pro_codigo_plu = det.pro_codigo_plu AND p.dep_id = ci.dep_id
+      WHERE ci.turno = ?
+        AND ci.chk_fecha >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        AND ci.chk_fecha <  CURDATE() + INTERVAL 1 DAY
+        AND d.dep_infaltable = 1
+      ORDER BY d.dep_nombre, p.pro_nombre_producto, ci.chk_id`,
+    [turnoOk]
+  );
+
+  // Agrupar dep -> producto -> día. El ORDER BY chk_id asc hace que el chequeo
+  // más reciente del día sobrescriba a uno anterior del mismo turno.
+  const depMap = new Map();
+  for (const r of rows) {
+    if (!depMap.has(r.dep_id)) {
+      depMap.set(r.dep_id, { dep_id: r.dep_id, dep_nombre: r.dep_nombre, productos: new Map() });
+    }
+    const dep = depMap.get(r.dep_id);
+    if (!dep.productos.has(r.pro_codigo_plu)) {
+      dep.productos.set(r.pro_codigo_plu, {
+        plu: r.pro_codigo_plu,
+        barra: r.pro_codigo_barra || '',
+        nombre: r.pro_nombre_producto,
+        dias: {},
+      });
+    }
+    dep.productos.get(r.pro_codigo_plu).dias[r.dia] = r.presente ? 1 : 0;
+  }
+
+  const departamentos = [...depMap.values()].map((dep) => ({
+    dep_id: dep.dep_id,
+    dep_nombre: dep.dep_nombre,
+    productos: [...dep.productos.values()].map((p) => {
+      const valores = Object.values(p.dias);
+      const optimo = valores.length;
+      const real = valores.filter((v) => v === 1).length;
+      return { ...p, real, optimo, cumpl: optimo > 0 ? real / optimo : null };
+    }),
+  }));
+
+  return { turno: turnoOk, anio, mes, diasHastaHoy, departamentos };
+}
+
+// GET /api/infaltables/reporte-mensual?turno=am|pm  → descarga xlsx de la hoja resumen
+async function descargarResumenMensual(req, res) {
+  try {
+    const turno = (req.query.turno === 'am' || req.query.turno === 'pm') ? req.query.turno : turnoActual();
+    const resumen = await resumenMensualData(turno);
+    const buffer = await generarExcelResumenInfaltables(resumen);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="resumen_infaltables_${turno}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('[descargarResumenMensual]', err.message);
+    res.status(500).json({ error: 'No se pudo generar el resumen mensual' });
   }
 }
 
@@ -369,5 +448,5 @@ async function actualizarConfig(req, res) {
 module.exports = {
   obtenerTurnoActual, listarDepartamentosTurno, listarParaJornada, asignarJornadaBulk,
   obtenerChecklist, guardarChequeo, obtenerDashboard, enviarReporteTurno,
-  obtenerConfig, actualizarConfig,
+  descargarResumenMensual, obtenerConfig, actualizarConfig,
 };

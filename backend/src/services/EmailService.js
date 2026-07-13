@@ -21,6 +21,9 @@ function esc(value) {
   }[c]));
 }
 
+const MESES = ['', 'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
+  'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+
 /** Genera buffer .xlsx — Orden de Producción (Áreas Productivas) */
 async function generarExcel(quiebres, depNombre, folio, fecha) {
   const wb  = new ExcelJS.Workbook();
@@ -475,7 +478,7 @@ async function enviarReporteInfaltables({ depNombre, correosDestino, usuNombre, 
 }
 
 /** Excel consolidado del turno: una fila por producto, con columna Departamento. */
-async function generarExcelInfaltablesTurno(departamentos, turno, fecha) {
+async function generarExcelInfaltablesTurno(departamentos, turno, fecha, resumen) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Infaltables');
 
@@ -515,6 +518,121 @@ async function generarExcelInfaltablesTurno(departamentos, turno, fecha) {
     }
   }
 
+  // Hoja resumen mensual (matriz de mediciones diarias del turno)
+  if (resumen) agregarHojaResumenInfaltables(wb, resumen);
+
+  return wb.xlsx.writeBuffer();
+}
+
+/**
+ * Agrega a un workbook la hoja "Resumen Mensual": matriz de mediciones diarias
+ * por producto (1 = presente, 0 = faltó, en blanco = no medido), agrupada por
+ * departamento, con Real / Óptimo / Cumpl% por producto. Filtrada por turno.
+ * resumen: { turno, anio, mes, diasHastaHoy, departamentos:[{ dep_nombre,
+ *            productos:[{ plu, barra, nombre, dias:{dia:0|1}, real, optimo, cumpl }] }] }
+ */
+function agregarHojaResumenInfaltables(wb, resumen) {
+  const { turno, anio, mes, diasHastaHoy, departamentos = [] } = resumen;
+  const ws = wb.addWorksheet('Resumen Mensual');
+  const nDias = Math.max(1, Number(diasHastaHoy) || 1);
+
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const borde = () => ({ top: thin, bottom: thin, left: thin, right: thin });
+
+  // Columnas: A Depto | B C.Barra | C Nombre | días 1..N | Real | Óptimo | Cumpl%
+  const FIRST_DAY_COL = 4;
+  const lastDayCol = FIRST_DAY_COL + nDias - 1;
+  const colReal    = lastDayCol + 1;
+  const colOptimo  = lastDayCol + 2;
+  const colCumpl   = lastDayCol + 3;
+  const totalCols  = colCumpl;
+
+  ws.getColumn(1).width = 18;
+  ws.getColumn(2).width = 14;
+  ws.getColumn(3).width = 40;
+  for (let c = FIRST_DAY_COL; c <= lastDayCol; c++) ws.getColumn(c).width = 4;
+  ws.getColumn(colReal).width = 7;
+  ws.getColumn(colOptimo).width = 8;
+  ws.getColumn(colCumpl).width = 9;
+
+  // Título
+  ws.mergeCells(1, 1, 1, totalCols);
+  const titulo = ws.getCell(1, 1);
+  titulo.value = `CHEQUEO INFALTABLES MES DE ${MESES[mes] || ''} ${anio} — TURNO ${String(turno).toUpperCase()}`;
+  titulo.font = { bold: true, size: 14 };
+  titulo.alignment = { horizontal: 'left', vertical: 'middle' };
+  titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+  ws.getRow(1).height = 24;
+
+  // Encabezado (fila 3)
+  const HEADER_ROW = 3;
+  const header = ['Departamento', 'C. Barra', 'Nombre Producto'];
+  for (let d = 1; d <= nDias; d++) header.push(d);
+  header.push('Real', 'Óptimo', 'Cumpl%');
+  const hRow = ws.getRow(HEADER_ROW);
+  header.forEach((h, i) => { hRow.getCell(i + 1).value = h; });
+  hRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = borde();
+  });
+  hRow.height = 18;
+
+  let rowIdx = HEADER_ROW + 1;
+  for (const dep of departamentos) {
+    const prods = dep.productos || [];
+    if (!prods.length) continue;
+    const startRow = rowIdx;
+    for (const p of prods) {
+      const row = ws.getRow(rowIdx);
+      row.getCell(2).value = p.barra || '';
+      row.getCell(3).value = p.nombre;
+      for (let d = 1; d <= nDias; d++) {
+        const cell = row.getCell(FIRST_DAY_COL + d - 1);
+        const v = p.dias ? p.dias[d] : undefined;
+        cell.value = (v === 0 || v === 1) ? v : null;
+        cell.alignment = { horizontal: 'center' };
+        if (v === 0) cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
+      }
+      const cReal = row.getCell(colReal);
+      cReal.value = p.real;
+      cReal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+      cReal.font = { bold: true };
+      cReal.alignment = { horizontal: 'center' };
+      const cOpt = row.getCell(colOptimo);
+      cOpt.value = p.optimo;
+      cOpt.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+      cOpt.alignment = { horizontal: 'center' };
+      const cCumpl = row.getCell(colCumpl);
+      if (p.cumpl != null) { cCumpl.value = p.cumpl; cCumpl.numFmt = '0%'; }
+      else cCumpl.value = 's/d';
+      cCumpl.alignment = { horizontal: 'center' };
+      for (let c = 1; c <= totalCols; c++) row.getCell(c).border = borde();
+      rowIdx++;
+    }
+    const endRow = rowIdx - 1;
+    const cDep = ws.getCell(startRow, 1);
+    cDep.value = dep.dep_nombre;
+    cDep.font = { bold: true };
+    cDep.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    if (endRow > startRow) ws.mergeCells(startRow, 1, endRow, 1);
+  }
+
+  if (rowIdx === HEADER_ROW + 1) {
+    ws.mergeCells(rowIdx, 1, rowIdx, totalCols);
+    const c = ws.getCell(rowIdx, 1);
+    c.value = `Sin chequeos registrados para el turno ${String(turno).toUpperCase()} en el mes.`;
+    c.alignment = { horizontal: 'center' };
+    c.font = { italic: true, color: { argb: 'FF6B7280' } };
+  }
+
+  return ws;
+}
+
+/** Genera buffer .xlsx con SOLO la hoja resumen mensual (descarga desde el panel) */
+async function generarExcelResumenInfaltables(resumen) {
+  const wb = new ExcelJS.Workbook();
+  agregarHojaResumenInfaltables(wb, resumen);
   return wb.xlsx.writeBuffer();
 }
 
@@ -523,7 +641,7 @@ async function generarExcelInfaltablesTurno(departamentos, turno, fecha) {
  * departamentos: [{ dep_nombre, meta, indice, productos:[{...presente}] }] (chequeados)
  * dashboard:     [{ dep_nombre, real, meta }] (TODOS los deptos de la jornada, para el gráfico)
  */
-async function enviarReporteTurnoInfaltables({ turno, fecha, usuNombre, correosDestino, departamentos, dashboard }) {
+async function enviarReporteTurnoInfaltables({ turno, fecha, usuNombre, correosDestino, departamentos, dashboard, resumen }) {
   const destinatario = correosDestino || process.env.EMAIL_PRODUCCION;
   if (!destinatario) return { enviado: false, motivo: 'sin destinatario' };
 
@@ -591,7 +709,7 @@ async function enviarReporteTurnoInfaltables({ turno, fecha, usuNombre, correosD
     </td></tr>
   </table></td></tr></table></body></html>`;
 
-  const excelBuffer = await generarExcelInfaltablesTurno(departamentos, turno, fecha);
+  const excelBuffer = await generarExcelInfaltablesTurno(departamentos, turno, fecha, resumen);
 
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
@@ -733,4 +851,4 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
   return { enviado: true, destinatario, productos: filas.length };
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, enviarPedidoUnidoTejaFood };
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, generarExcelResumenInfaltables, enviarPedidoUnidoTejaFood };
