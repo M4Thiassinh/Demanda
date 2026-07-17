@@ -14,5 +14,7 @@ router.get('/reporte-mensual', ctrl.descargarResumenMensual);
 router.get('/dashboard',      ctrl.obtenerDashboard);
 router.get('/config',         ctrl.obtenerConfig);
 router.put('/config/:depId',  ctrl.actualizarConfig);
+router.get('/correos-turno',  ctrl.obtenerCorreosTurno);
+router.put('/correos-turno/:turno', ctrl.actualizarCorreosTurno);
 
 module.exports = router;

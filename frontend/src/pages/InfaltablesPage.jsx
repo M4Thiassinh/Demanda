@@ -6,6 +6,7 @@ import {
   getUsuarios, getTurnoActual, getDepartamentosInfaltables,
   getChecklistInfaltables, guardarChequeoInfaltables, enviarReporteTurnoInfaltables,
   descargarResumenInfaltables, getInfaltablesConfig, updateInfaltablesConfig,
+  getCorreosTurnoInfaltables, updateCorreosTurnoInfaltables,
 } from '../api'
 
 export default function InfaltablesPage() {
@@ -305,17 +306,16 @@ function Chequeo({ depSel, usuSel, turno }) {
   )
 }
 
-/* ── Pestaña: Config (meta % + correos destino del depto) ────── */
+/* ── Pestaña: Config (meta % por depto + correos por turno) ──── */
 function Config({ depSel, depNombre }) {
   const [meta, setMeta]       = useState('15')
-  const [correos, setCorreos] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
 
   useEffect(() => {
     setLoading(true)
     getInfaltablesConfig(depSel)
-      .then((c) => { setMeta(String(c.meta_faltante ?? 15)); setCorreos(c.correos_destino || '') })
+      .then((c) => setMeta(String(c.meta_faltante ?? 15)))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [depSel])
@@ -323,8 +323,8 @@ function Config({ depSel, depNombre }) {
   const guardar = async () => {
     setSaving(true)
     try {
-      await updateInfaltablesConfig(depSel, { meta_faltante: Number(meta), correos_destino: correos })
-      Swal.fire({ icon: 'success', title: 'Configuración guardada', timer: 1300, showConfirmButton: false })
+      await updateInfaltablesConfig(depSel, { meta_faltante: Number(meta) })
+      Swal.fire({ icon: 'success', title: 'Meta guardada', timer: 1300, showConfirmButton: false })
     } catch (e) {
       Swal.fire('Error', e?.response?.data?.error || 'No se pudo guardar', 'error')
     } finally { setSaving(false) }
@@ -333,19 +333,67 @@ function Config({ depSel, depNombre }) {
   if (loading) return <p className="text-center text-gray-500 py-8">Cargando…</p>
 
   return (
-    <div className="card p-4 space-y-4 max-w-md">
-      <h2 className="text-white font-bold">⚙️ Configuración — {depNombre}</h2>
-      <div>
-        <label className="label">Meta de índice faltante (%)</label>
-        <input type="number" min="0" max="100" step="0.5" value={meta} onChange={(e) => setMeta(e.target.value)} className="input-field" />
+    <div className="space-y-4 max-w-md">
+      <div className="card p-4 space-y-4">
+        <h2 className="text-white font-bold">⚙️ Meta — {depNombre}</h2>
+        <div>
+          <label className="label">Meta de índice faltante (%)</label>
+          <input type="number" min="0" max="100" step="0.5" value={meta} onChange={(e) => setMeta(e.target.value)} className="input-field" />
+          <p className="text-gray-500 text-xs mt-1">Umbral de faltantes de este departamento (se usa en el gráfico del reporte).</p>
+        </div>
+        <button onClick={guardar} disabled={saving} className="btn-primary w-full">{saving ? 'Guardando…' : 'Guardar meta'}</button>
       </div>
+
+      <CorreosTurno />
+    </div>
+  )
+}
+
+/* ── Correos destino del reporte, por turno (AM / PM) ────────── */
+function CorreosTurno() {
+  const [correos, setCorreos] = useState({ am: '', pm: '' })
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving]   = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([getCorreosTurnoInfaltables('am'), getCorreosTurnoInfaltables('pm')])
+      .then(([am, pm]) => setCorreos({ am: am.correos_destino || '', pm: pm.correos_destino || '' }))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const guardar = async (turno) => {
+    setSaving(turno)
+    try {
+      await updateCorreosTurnoInfaltables(turno, correos[turno])
+      Swal.fire({ icon: 'success', title: `Correos ${turno.toUpperCase()} guardados`, timer: 1300, showConfirmButton: false })
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo guardar', 'error')
+    } finally { setSaving('') }
+  }
+
+  if (loading) return <div className="card p-4"><p className="text-center text-gray-500 py-4">Cargando correos…</p></div>
+
+  return (
+    <div className="card p-4 space-y-4">
       <div>
-        <label className="label">Correos destino del reporte (separados por coma)</label>
-        <input type="text" value={correos} onChange={(e) => setCorreos(e.target.value)} className="input-field"
-          placeholder="uno@correo.cl, dos@correo.cl" />
-        <p className="text-gray-500 text-xs mt-1">A estos correos llega el reporte cada vez que se finaliza un chequeo.</p>
+        <h2 className="text-white font-bold">📧 Correos del reporte (por turno)</h2>
+        <p className="text-gray-500 text-xs mt-1">Estos destinatarios reciben el reporte consolidado del turno. Aplica a todos los departamentos de ese turno.</p>
       </div>
-      <button onClick={guardar} disabled={saving} className="btn-primary w-full">{saving ? 'Guardando…' : 'Guardar configuración'}</button>
+      {['am', 'pm'].map((t) => (
+        <div key={t}>
+          <label className="label">Correos turno {t.toUpperCase()} (separados por coma)</label>
+          <div className="flex gap-2">
+            <input type="text" value={correos[t]}
+              onChange={(e) => setCorreos((prev) => ({ ...prev, [t]: e.target.value }))}
+              className="input-field flex-1" placeholder="uno@correo.cl, dos@correo.cl" />
+            <button onClick={() => guardar(t)} disabled={saving === t} className="btn-secondary shrink-0">
+              {saving === t ? '…' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

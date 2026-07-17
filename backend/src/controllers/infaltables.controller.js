@@ -291,15 +291,14 @@ async function enviarReporteTurno(req, res) {
       meta: Number(d.meta),
     }));
 
-    // Destinatarios: unión de los correos configurados de los departamentos de la jornada
-    const ph = deps.map(() => '?').join(',');
+    // Destinatarios: lista fija del turno (AM/PM), configurable desde la app.
     const { rows: correosRows } = await db.query(
-      `SELECT correos_destino FROM infaltables_config WHERE dep_id IN (${ph})`,
-      deps.map((d) => d.dep_id)
+      `SELECT correos_destino FROM infaltables_correos_turno WHERE turno = ?`,
+      [turno]
     );
     const set = new Set();
-    correosRows.forEach((r) => (r.correos_destino || '')
-      .split(/[,;]/).map((e) => e.trim()).filter(Boolean).forEach((e) => set.add(e)));
+    (correosRows[0]?.correos_destino || '')
+      .split(/[,;]/).map((e) => e.trim()).filter(Boolean).forEach((e) => set.add(e));
     const correos = set.size ? [...set].join(', ') : null;
 
     // Responsable
@@ -403,40 +402,35 @@ async function descargarResumenMensual(req, res) {
   }
 }
 
-// GET /api/infaltables/config?dep_id=22
+// GET /api/infaltables/config?dep_id=22  → meta % por departamento
 async function obtenerConfig(req, res) {
   try {
     const { dep_id } = req.query;
     if (!dep_id) return res.status(400).json({ error: 'dep_id requerido' });
     const { rows } = await db.query(
-      `SELECT meta_faltante, correos_destino FROM infaltables_config WHERE dep_id = ?`,
+      `SELECT meta_faltante FROM infaltables_config WHERE dep_id = ?`,
       [dep_id]
     );
-    res.json(rows[0] || { meta_faltante: 15, correos_destino: '' });
+    res.json(rows[0] || { meta_faltante: 15 });
   } catch (err) {
     console.error('[obtenerConfig]', err.message);
     res.status(500).json({ error: 'No se pudo cargar la configuración' });
   }
 }
 
-// PUT /api/infaltables/config/:depId  → { meta_faltante, correos_destino }
+// PUT /api/infaltables/config/:depId  → { meta_faltante }
+// Los correos ya NO se configuran por departamento: ver correos-turno.
 async function actualizarConfig(req, res) {
   try {
     const { depId } = req.params;
-    const { meta_faltante, correos_destino } = req.body;
-
-    const emailCheck = validarEmails(correos_destino);
-    if (!emailCheck.ok) return res.status(400).json({ error: `Correo inválido: ${emailCheck.invalido}` });
-    const correos = emailCheck.lista.length ? emailCheck.lista.join(', ') : null;
-
-    let meta = Number(meta_faltante);
+    let meta = Number(req.body.meta_faltante);
     if (!Number.isFinite(meta) || meta < 0 || meta > 100) meta = 15;
 
     await db.query(
-      `INSERT INTO infaltables_config (dep_id, meta_faltante, correos_destino)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE meta_faltante = VALUES(meta_faltante), correos_destino = VALUES(correos_destino)`,
-      [depId, meta, correos]
+      `INSERT INTO infaltables_config (dep_id, meta_faltante)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE meta_faltante = VALUES(meta_faltante)`,
+      [depId, meta]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -445,8 +439,47 @@ async function actualizarConfig(req, res) {
   }
 }
 
+// GET /api/infaltables/correos-turno?turno=am|pm  → destinatarios del turno
+async function obtenerCorreosTurno(req, res) {
+  try {
+    const turno = (req.query.turno === 'am' || req.query.turno === 'pm') ? req.query.turno : turnoActual();
+    const { rows } = await db.query(
+      `SELECT correos_destino FROM infaltables_correos_turno WHERE turno = ?`,
+      [turno]
+    );
+    res.json({ turno, correos_destino: rows[0]?.correos_destino || '' });
+  } catch (err) {
+    console.error('[obtenerCorreosTurno]', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar los correos del turno' });
+  }
+}
+
+// PUT /api/infaltables/correos-turno/:turno  → { correos_destino }
+async function actualizarCorreosTurno(req, res) {
+  try {
+    const turno = (req.params.turno === 'am' || req.params.turno === 'pm') ? req.params.turno : null;
+    if (!turno) return res.status(400).json({ error: 'Turno inválido' });
+
+    const emailCheck = validarEmails(req.body.correos_destino);
+    if (!emailCheck.ok) return res.status(400).json({ error: `Correo inválido: ${emailCheck.invalido}` });
+    const correos = emailCheck.lista.length ? emailCheck.lista.join(', ') : null;
+
+    await db.query(
+      `INSERT INTO infaltables_correos_turno (turno, correos_destino)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE correos_destino = VALUES(correos_destino)`,
+      [turno, correos]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[actualizarCorreosTurno]', err.message);
+    res.status(500).json({ error: 'No se pudieron guardar los correos del turno' });
+  }
+}
+
 module.exports = {
   obtenerTurnoActual, listarDepartamentosTurno, listarParaJornada, asignarJornadaBulk,
   obtenerChecklist, guardarChequeo, obtenerDashboard, enviarReporteTurno,
   descargarResumenMensual, obtenerConfig, actualizarConfig,
+  obtenerCorreosTurno, actualizarCorreosTurno,
 };

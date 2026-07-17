@@ -88,5 +88,7 @@ export const descargarResumenInfaltables = (turno) => api.get('/infaltables/repo
 export const getInfaltablesDashboard = () => api.get('/infaltables/dashboard').then(r => r.data)
 export const getInfaltablesConfig = (depId) => api.get('/infaltables/config', { params: { dep_id: depId } }).then(r => r.data)
 export const updateInfaltablesConfig = (depId, data) => api.put(`/infaltables/config/${depId}`, data).then(r => r.data)
+export const getCorreosTurnoInfaltables = (turno) => api.get('/infaltables/correos-turno', { params: { turno } }).then(r => r.data)
+export const updateCorreosTurnoInfaltables = (turno, correos_destino) => api.put(`/infaltables/correos-turno/${turno}`, { correos_destino }).then(r => r.data)
 
 export default api
