@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import useAppStore from './store/useAppStore'
+import ErrorBoundary from './components/ErrorBoundary'
 import RolePage    from './pages/RolePage'
 import RevisionPage from './pages/RevisionPage'
 import AdminPage   from './pages/AdminPage'
@@ -20,6 +21,7 @@ function ProtectedRoute({ children, requiredRole, requireDep }) {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RolePage />} />
@@ -58,5 +60,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }

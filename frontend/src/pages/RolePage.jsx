@@ -15,8 +15,8 @@ export default function RolePage() {
   const [error, setError]                 = useState('')
 
   useEffect(() => {
-    getDepartamentos().then(setDepartamentos).catch(() => {})
-    getUsuarios().then(setUsuarios).catch(() => {})
+    getDepartamentos().then((d) => setDepartamentos(Array.isArray(d) ? d : [])).catch(() => {})
+    getUsuarios().then((u) => setUsuarios(Array.isArray(u) ? u : [])).catch(() => {})
   }, [])
 
   const continuar = async () => {
@@ -55,9 +55,10 @@ export default function RolePage() {
   const esPerfilRevision = role === 'operador' || esTomaStock
   const tituloPerfil = esTomaStock ? 'Toma de Stock' : 'Solicitud Producción Administración'
   const iconoPerfil  = esTomaStock ? '📦' : '📋'
+  const depsList = Array.isArray(departamentos) ? departamentos : []
   const depsVisibles = esTomaStock
-    ? departamentos.filter((d) => !d.dep_productiva)
-    : departamentos.filter((d) => d.dep_productiva)
+    ? depsList.filter((d) => !d.dep_productiva)
+    : depsList.filter((d) => d.dep_productiva)
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">

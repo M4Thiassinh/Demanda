@@ -29,6 +29,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Si esperábamos JSON pero llega HTML (página de aviso de ngrok, backend caído o
+// un VITE_API_URL apuntando a un sitio equivocado que responde 200 con HTML),
+// lo convertimos en error. Así los .catch() de la app actúan y evitamos que
+// luego reviente un .filter()/.map() sobre un string y se caiga toda la app.
+api.interceptors.response.use((response) => {
+  if (typeof response.data === 'string' && /^\s*<(?:!doctype|html)/i.test(response.data)) {
+    return Promise.reject(new Error('Respuesta no válida del servidor (¿backend no disponible?)'));
+  }
+  return response;
+});
+
 export const loginAdmin = (password) => api.post('/admin/login', { password }).then(r => r.data)
 export const loginMaster = (password) => api.post('/admin/login-master', { password }).then(r => r.data)
 
