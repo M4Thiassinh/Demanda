@@ -169,6 +169,9 @@ export default function InfaltablesPage() {
             </button>
           </div>
         )}
+
+        {/* Config de correos por turno: global, no requiere seleccionar departamento */}
+        <CorreosTurno />
       </div>
     </div>
   )
@@ -333,35 +336,35 @@ function Config({ depSel, depNombre }) {
   if (loading) return <p className="text-center text-gray-500 py-8">Cargando…</p>
 
   return (
-    <div className="space-y-4 max-w-md">
-      <div className="card p-4 space-y-4">
-        <h2 className="text-white font-bold">⚙️ Meta — {depNombre}</h2>
-        <div>
-          <label className="label">Meta de índice faltante (%)</label>
-          <input type="number" min="0" max="100" step="0.5" value={meta} onChange={(e) => setMeta(e.target.value)} className="input-field" />
-          <p className="text-gray-500 text-xs mt-1">Umbral de faltantes de este departamento (se usa en el gráfico del reporte).</p>
-        </div>
-        <button onClick={guardar} disabled={saving} className="btn-primary w-full">{saving ? 'Guardando…' : 'Guardar meta'}</button>
+    <div className="card p-4 space-y-4 max-w-md">
+      <h2 className="text-white font-bold">⚙️ Meta — {depNombre}</h2>
+      <div>
+        <label className="label">Meta de índice faltante (%)</label>
+        <input type="number" min="0" max="100" step="0.5" value={meta} onChange={(e) => setMeta(e.target.value)} className="input-field" />
+        <p className="text-gray-500 text-xs mt-1">Umbral de faltantes de este departamento (se usa en el gráfico del reporte).</p>
       </div>
-
-      <CorreosTurno />
+      <button onClick={guardar} disabled={saving} className="btn-primary w-full">{saving ? 'Guardando…' : 'Guardar meta'}</button>
     </div>
   )
 }
 
-/* ── Correos destino del reporte, por turno (AM / PM) ────────── */
+/* ── Correos destino del reporte, por turno (AM / PM) ──────────
+   Sección global (no depende del departamento). Plegable: carga al abrir. */
 function CorreosTurno() {
+  const [abierto, setAbierto] = useState(false)
   const [correos, setCorreos] = useState({ am: '', pm: '' })
   const [loading, setLoading] = useState(false)
+  const [cargado, setCargado] = useState(false)
   const [saving, setSaving]   = useState('')
 
   useEffect(() => {
+    if (!abierto || cargado) return
     setLoading(true)
     Promise.all([getCorreosTurnoInfaltables('am'), getCorreosTurnoInfaltables('pm')])
-      .then(([am, pm]) => setCorreos({ am: am.correos_destino || '', pm: pm.correos_destino || '' }))
+      .then(([am, pm]) => { setCorreos({ am: am.correos_destino || '', pm: pm.correos_destino || '' }); setCargado(true) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [abierto, cargado])
 
   const guardar = async (turno) => {
     setSaving(turno)
@@ -373,27 +376,37 @@ function CorreosTurno() {
     } finally { setSaving('') }
   }
 
-  if (loading) return <div className="card p-4"><p className="text-center text-gray-500 py-4">Cargando correos…</p></div>
-
   return (
-    <div className="card p-4 space-y-4">
-      <div>
-        <h2 className="text-white font-bold">📧 Correos del reporte (por turno)</h2>
-        <p className="text-gray-500 text-xs mt-1">Estos destinatarios reciben el reporte consolidado del turno. Aplica a todos los departamentos de ese turno.</p>
-      </div>
-      {['am', 'pm'].map((t) => (
-        <div key={t}>
-          <label className="label">Correos turno {t.toUpperCase()} (separados por coma)</label>
-          <div className="flex gap-2">
-            <input type="text" value={correos[t]}
-              onChange={(e) => setCorreos((prev) => ({ ...prev, [t]: e.target.value }))}
-              className="input-field flex-1" placeholder="uno@correo.cl, dos@correo.cl" />
-            <button onClick={() => guardar(t)} disabled={saving === t} className="btn-secondary shrink-0">
-              {saving === t ? '…' : 'Guardar'}
-            </button>
-          </div>
+    <div className="card p-4">
+      <button onClick={() => setAbierto((v) => !v)} className="w-full flex items-center justify-between gap-3 text-left">
+        <div className="min-w-0">
+          <p className="text-white font-semibold text-sm">📧 Correos del reporte (por turno)</p>
+          <p className="text-gray-500 text-xs">Destinatarios del reporte de cada turno (AM / PM). Aplica a todos los departamentos.</p>
         </div>
-      ))}
+        <span className="text-gray-400 shrink-0 text-lg">{abierto ? '▲' : '▼'}</span>
+      </button>
+
+      {abierto && (
+        <div className="mt-4 space-y-4">
+          {loading ? (
+            <p className="text-center text-gray-500 py-4">Cargando correos…</p>
+          ) : (
+            ['am', 'pm'].map((t) => (
+              <div key={t}>
+                <label className="label">Correos turno {t.toUpperCase()} (separados por coma)</label>
+                <div className="flex gap-2">
+                  <input type="text" value={correos[t]}
+                    onChange={(e) => setCorreos((prev) => ({ ...prev, [t]: e.target.value }))}
+                    className="input-field flex-1" placeholder="uno@correo.cl, dos@correo.cl" />
+                  <button onClick={() => guardar(t)} disabled={saving === t} className="btn-secondary shrink-0">
+                    {saving === t ? '…' : 'Guardar'}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
