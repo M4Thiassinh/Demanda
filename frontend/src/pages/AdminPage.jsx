@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
 import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, getClasificacion, clasificacionBulk } from '../api'
 import MasterAdminPanel from '../components/admin/MasterAdminPanel'
+import Logo from '../components/Logo'
 
 // ── Tab Configuración ────────────────────────────────────────
 function ConfigTab() {
@@ -770,11 +771,12 @@ export default function AdminPage() {
 
   return (
     <div className={`min-h-screen bg-gray-950 mx-auto ${anchoTab}`}>
-      <header className="bg-gray-900 border-b border-gray-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
+      <header className="bg-teja-900 border-b border-teja-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => { logout(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
-        <div><p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
-          <h1 className="text-white font-bold">Panel Administrador</h1></div>
-        <button onClick={handleLogout} className="ml-auto bg-rose-900/40 hover:bg-rose-800/60 border border-rose-800/50 rounded-full px-4 py-1.5 text-rose-300 text-xs font-semibold transition-colors">
+        <div><p className="text-xs text-gray-500 uppercase tracking-wider">Administrador</p>
+          <h1 className="text-white font-bold">Panel de Gestión</h1></div>
+        <Logo imgClass="h-6" padClass="px-2.5 py-1" className="ml-auto" />
+        <button onClick={handleLogout} className="bg-rose-900/40 hover:bg-rose-800/60 border border-rose-800/50 rounded-full px-4 py-1.5 text-rose-300 text-xs font-semibold transition-colors">
           Cerrar Sesión
         </button>
       </header>

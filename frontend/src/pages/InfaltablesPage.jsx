@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import useAppStore from '../store/useAppStore'
+import Logo from '../components/Logo'
 import {
   getUsuarios, getTurnoActual, getDepartamentosInfaltables,
   getChecklistInfaltables, guardarChequeoInfaltables, enviarReporteTurnoInfaltables,
@@ -77,12 +78,13 @@ export default function InfaltablesPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 max-w-2xl mx-auto">
-      <header className="bg-gray-900 border-b border-gray-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
+      <header className="bg-teja-900 border-b border-teja-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => { logout(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
         <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
-          <h1 className="text-white font-bold">🎯 Infaltables{depNombre ? ` — ${depNombre}` : ''}</h1>
+          <p className="text-xs text-gray-500 uppercase tracking-wider">Infaltables</p>
+          <h1 className="text-white font-bold">🎯 {depNombre || 'Chequeo de productos'}</h1>
         </div>
+        <Logo imgClass="h-6" padClass="px-2.5 py-1" className="ml-auto" />
       </header>
 
       <div className="p-4 space-y-4">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
+import Logo from '../components/Logo'
 import { getDepartamentos, getProductosLista } from '../api'
 
 // Vista simple (por ahora): elegir departamento productivo y ver sus productos especiales.
@@ -35,12 +36,13 @@ export default function AreasProductivasPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 max-w-2xl mx-auto">
-      <header className="bg-gray-900 border-b border-gray-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
+      <header className="bg-teja-900 border-b border-teja-700/50 px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => { logout(); navigate('/') }} className="text-gray-400 hover:text-white text-sm">← Salir</button>
         <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Teja Market</p>
-          <h1 className="text-white font-bold">🏭 Solicitud Producción — Áreas Productivas</h1>
+          <p className="text-xs text-gray-500 uppercase tracking-wider">Áreas Productivas</p>
+          <h1 className="text-white font-bold">🏭 Solicitud Producción</h1>
         </div>
+        <Logo imgClass="h-6" padClass="px-2.5 py-1" className="ml-auto" />
       </header>
 
       <div className="p-4 space-y-4">

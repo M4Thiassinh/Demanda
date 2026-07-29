@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
 import { getDepartamentos, getUsuarios, iniciarRevision, buscarRevisionActiva } from '../api'
+import Logo from '../components/Logo'
 
 export default function RolePage() {
   const navigate = useNavigate()
@@ -67,11 +68,8 @@ export default function RolePage() {
       </div>
 
       {/* Branding */}
-      <div className="relative mb-8 text-center animate-fade-in">
-        <div className="inline-flex items-center justify-center w-20 h-20 bg-brand-600 rounded-3xl shadow-2xl shadow-brand-900/60 mb-4 rotate-3">
-          <span className="text-4xl">🏪</span>
-        </div>
-        <h1 className="text-3xl font-black text-white">Teja Market</h1>
+      <div className="relative mb-8 text-center animate-fade-in flex flex-col items-center">
+        <Logo imgClass="h-11" className="mb-4" />
         <p className="text-gray-400 mt-1 text-xs font-semibold tracking-widest uppercase">Sistema de Reposición</p>
       </div>
 

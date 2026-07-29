@@ -4,17 +4,27 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Verde lima de la marca ("market") — acento principal · base #b8c030
         brand: {
-          50:  '#fff7ed',
-          100: '#ffedd5',
-          200: '#fed7aa',
-          300: '#fdba74',
-          400: '#fb923c',
-          500: '#f97316',
-          600: '#ea580c',
-          700: '#c2410c',
-          800: '#9a3412',
-          900: '#7c2d12',
+          50:  '#fafcf2',
+          100: '#f2f4da',
+          200: '#e6e9b6',
+          300: '#d8dc8d',
+          400: '#c9cf63',
+          500: '#b8c030',
+          600: '#9ca329',
+          700: '#818622',
+          800: '#656a1a',
+          900: '#4d5114',
+        },
+        // Verde oscuro de la marca ("teja") — textos/encabezados/fondos · base #2c3c34
+        teja: {
+          DEFAULT: '#2c3c34',
+          500: '#525f59',
+          600: '#2c3c34',
+          700: '#23302a',
+          800: '#1b2520',
+          900: '#121916',
         },
       },
       fontFamily: {
