@@ -270,8 +270,8 @@ function Chequeo({ depSel, usuSel, turno }) {
               <div key={p.pro_codigo_plu} className={`p-3 flex items-center gap-3 ${ausente ? 'bg-rose-900/20' : ''}`}>
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">{p.pro_nombre_producto}</p>
-                  <p className="text-gray-500 text-xs font-mono mb-1.5">
-                    PLU {p.pro_codigo_plu} · {p.pro_jornada.toUpperCase()}
+                  <p className="text-gray-300 text-xs font-mono mb-1.5">
+                    Cód. {p.pro_codigo_barra || p.pro_codigo_plu} · {p.pro_jornada.toUpperCase()}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-baseline gap-1 px-2 py-1 rounded-lg bg-emerald-900/30 border border-emerald-800/50">

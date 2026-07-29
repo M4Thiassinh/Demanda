@@ -325,14 +325,29 @@ function UsuariosTab() {
 
 // ── Tab Exportar ──────────────────────────────────────────────
 function ExportTab() {
+  // Fecha local en formato YYYY-MM-DD (para inputs type=date)
+  const fmtFecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const hoyStr = fmtFecha(new Date())
+
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [fechaIni, setFI]        = useState('')
-  const [fechaFin, setFF]        = useState('')
+  const [fechaIni, setFI]        = useState(hoyStr)   // por defecto: hoy
+  const [fechaFin, setFF]        = useState(hoyStr)
   const [loading, setLoading]    = useState(false)
   const [error, setError]        = useState('')
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
+
+  // Botones rápidos de rango de fecha
+  const setRango = (preset) => {
+    const hoy = new Date()
+    const ini = new Date(hoy)
+    if (preset === 'hoy')       { /* ini = hoy */ }
+    else if (preset === 'ayer') { ini.setDate(hoy.getDate() - 1); hoy.setDate(hoy.getDate() - 1) }
+    else if (preset === '7d')   { ini.setDate(hoy.getDate() - 6) }
+    else if (preset === 'mes')  { ini.setDate(1) }
+    setFI(fmtFecha(ini)); setFF(fmtFecha(hoy))
+  }
 
   const exportar = async () => {
     setLoading(true); setError('')
@@ -355,6 +370,17 @@ function ExportTab() {
           <option value="">— Todos —</option>
           {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
         </select>
+      </div>
+      <div>
+        <label className="label">Rango rápido</label>
+        <div className="flex flex-wrap gap-2">
+          {[['hoy', 'Hoy'], ['ayer', 'Ayer'], ['7d', 'Últimos 7 días'], ['mes', 'Este mes']].map(([k, txt]) => (
+            <button key={k} type="button" onClick={() => setRango(k)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-brand-500 transition-colors">
+              {txt}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div><label className="label">Desde</label><input type="date" value={fechaIni} onChange={e => setFI(e.target.value)} className="input-field" /></div>

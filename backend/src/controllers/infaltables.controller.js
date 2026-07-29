@@ -117,7 +117,7 @@ async function obtenerChecklist(req, res) {
     const turno = (req.query.turno === 'am' || req.query.turno === 'pm') ? req.query.turno : turnoActual();
 
     const { rows } = await db.query(
-      `SELECT p.pro_codigo_plu, p.pro_nombre_producto, p.pro_jornada,
+      `SELECT p.pro_codigo_plu, p.pro_codigo_barra, p.pro_nombre_producto, p.pro_jornada,
               p.vta_total_periodo, p.dias_historial,
               s.stock_sala AS stock_referencia
          FROM productos p
@@ -131,6 +131,7 @@ async function obtenerChecklist(req, res) {
 
     const productos = rows.map((r) => ({
       pro_codigo_plu: r.pro_codigo_plu,
+      pro_codigo_barra: r.pro_codigo_barra,
       pro_nombre_producto: r.pro_nombre_producto,
       pro_jornada: r.pro_jornada,
       stock_referencia: r.stock_referencia,

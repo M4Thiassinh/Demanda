@@ -303,17 +303,12 @@ async function exportarExcel(req, res) {
       `SELECT r.rev_folio, r.rev_fecha, d.dep_nombre,
               COALESCE(u.usu_nombre,'Operador') AS usu_nombre,
               dr.pro_codigo_plu, p.pro_codigo_barra, p.pro_nombre_producto,
-              dr.det_stock_sala,
-              p.vta_total_periodo, p.dias_historial,
-              p.pro_dias_produccion_override, p.pro_dias_seguridad_override,
-              p.pro_dias_elaboracion, p.pro_cantidad_minima,
-              c.dias_produccion_semana
+              COALESCE(dr.det_cantidad_pedir, 0) AS det_cantidad_pedir
          FROM revisiones r
          JOIN departamentos d    ON d.dep_id = r.dep_id
          LEFT JOIN usuarios u    ON u.usu_id = r.usu_id
          JOIN detalle_revision dr ON dr.rev_id = r.rev_id
          JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
-         JOIN configuraciones c   ON c.dep_id = r.dep_id
         WHERE r.rev_estado = 'completada'
           AND (? IS NULL OR r.dep_id = ?)
           AND (? IS NULL OR DATE(r.rev_fecha) >= ?)
@@ -324,37 +319,19 @@ async function exportarExcel(req, res) {
        fecha_fin || null, fecha_fin || null]
     );
 
-    const lineas = rows.map((row) => {
-      const calc = calcularDemanda(
-        { dias_produccion_semana: row.dias_produccion_semana },
-        { vta_total_periodo: row.vta_total_periodo, dias_historial: row.dias_historial,
-          pro_dias_produccion_override: row.pro_dias_produccion_override,
-          pro_dias_seguridad_override:  row.pro_dias_seguridad_override,
-          pro_dias_elaboracion:         row.pro_dias_elaboracion,
-          pro_cantidad_minima:          row.pro_cantidad_minima },
-        row.det_stock_sala
-      );
-      return { ...row, ...calc };
-    });
-
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Consolidado');
 
     ws.columns = [
-      { header: 'Folio',          key: 'rev_folio',              width: 22 },
-      { header: 'Fecha',          key: 'rev_fecha',              width: 20 },
-      { header: 'Usuario',        key: 'usu_nombre',             width: 14 },
-      { header: 'Departamento',   key: 'dep_nombre',             width: 14 },
-      { header: 'PLU',            key: 'pro_codigo_plu',         width: 12 },
-      { header: 'Código Barra',   key: 'pro_codigo_barra',       width: 16 },
-      { header: 'Producto',       key: 'pro_nombre_producto',    width: 40 },
-      { header: 'Stock Sala',     key: 'det_stock_sala',         width: 12 },
-      { header: 'Venta Diaria',   key: 'ventaDiaria',            width: 13 },
-      { header: 'Lote Base',      key: 'loteProduccionBase',     width: 13 },
-      { header: 'Stock Seg.',     key: 'stockSeguridadCalculado',width: 13 },
-      { header: 'Demanda Total',  key: 'demandaTotalRequerida',  width: 14 },
-      { header: 'A Producir',     key: 'cantidadAProducir',      width: 12 },
+      { header: 'Folio',           key: 'rev_folio',           width: 22 },
+      { header: 'Fecha',           key: 'rev_fecha',           width: 20 },
+      { header: 'Usuario',         key: 'usu_nombre',          width: 16 },
+      { header: 'Departamento',    key: 'dep_nombre',          width: 16 },
+      { header: 'PLU',             key: 'pro_codigo_plu',      width: 12 },
+      { header: 'Código Barra',    key: 'pro_codigo_barra',    width: 16 },
+      { header: 'Producto',        key: 'pro_nombre_producto', width: 40 },
+      { header: 'Cantidad Pedida', key: 'det_cantidad_pedir',  width: 16 },
     ];
 
     ws.getRow(1).eachCell((cell) => {
@@ -362,7 +339,7 @@ async function exportarExcel(req, res) {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
     });
 
-    lineas.forEach((l) => ws.addRow({
+    rows.forEach((l) => ws.addRow({
       rev_folio: l.rev_folio,
       rev_fecha: new Date(l.rev_fecha).toLocaleString('es-CL'),
       usu_nombre: l.usu_nombre,
@@ -370,12 +347,7 @@ async function exportarExcel(req, res) {
       pro_codigo_plu: l.pro_codigo_plu,
       pro_codigo_barra: l.pro_codigo_barra || '',
       pro_nombre_producto: l.pro_nombre_producto,
-      det_stock_sala: l.det_stock_sala,
-      ventaDiaria: l.ventaDiaria,
-      loteProduccionBase: l.loteProduccionBase,
-      stockSeguridadCalculado: l.stockSeguridadCalculado,
-      demandaTotalRequerida: l.demandaTotalRequerida,
-      cantidadAProducir: l.cantidadAProducir,
+      det_cantidad_pedir: l.det_cantidad_pedir,
     }));
 
     const buffer = await wb.xlsx.writeBuffer();
