@@ -310,6 +310,7 @@ async function exportarExcel(req, res) {
          JOIN detalle_revision dr ON dr.rev_id = r.rev_id
          JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
         WHERE r.rev_estado = 'completada'
+          AND COALESCE(dr.det_cantidad_pedir, 0) > 0
           AND (? IS NULL OR r.dep_id = ?)
           AND (? IS NULL OR DATE(r.rev_fecha) >= ?)
           AND (? IS NULL OR DATE(r.rev_fecha) <= ?)
