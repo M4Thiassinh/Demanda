@@ -538,22 +538,26 @@ function agregarHojaResumenInfaltables(wb, resumen) {
 
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const borde = () => ({ top: thin, bottom: thin, left: thin, right: thin });
+  const YELLOW = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+  const RED    = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC00000' } };
+  const WHITE  = 'FFFFFFFF';
+  const UMBRAL = 0.8; // bajo 80% de cumplimiento → rojo
 
-  // Columnas: A Depto | B C.Barra | C Nombre | días 1..N | Real | Óptimo | Cumpl%
-  const FIRST_DAY_COL = 4;
+  // Columnas: A Depto | B C.Barra | C Nombre | Cumpl% | Real | Óptimo | días 1..N
+  const colCumpl   = 4;
+  const colReal    = 5;
+  const colOptimo  = 6;
+  const FIRST_DAY_COL = 7;
   const lastDayCol = FIRST_DAY_COL + nDias - 1;
-  const colReal    = lastDayCol + 1;
-  const colOptimo  = lastDayCol + 2;
-  const colCumpl   = lastDayCol + 3;
-  const totalCols  = colCumpl;
+  const totalCols  = lastDayCol;
 
   ws.getColumn(1).width = 18;
   ws.getColumn(2).width = 14;
   ws.getColumn(3).width = 40;
-  for (let c = FIRST_DAY_COL; c <= lastDayCol; c++) ws.getColumn(c).width = 4;
+  ws.getColumn(colCumpl).width = 9;
   ws.getColumn(colReal).width = 7;
   ws.getColumn(colOptimo).width = 8;
-  ws.getColumn(colCumpl).width = 9;
+  for (let c = FIRST_DAY_COL; c <= lastDayCol; c++) ws.getColumn(c).width = 4;
 
   // Título
   ws.mergeCells(1, 1, 1, totalCols);
@@ -566,9 +570,8 @@ function agregarHojaResumenInfaltables(wb, resumen) {
 
   // Encabezado (fila 3)
   const HEADER_ROW = 3;
-  const header = ['Departamento', 'C. Barra', 'Nombre Producto'];
+  const header = ['Departamento', 'C. Barra', 'Nombre Producto', 'Cumpl%', 'Real', 'Óptimo'];
   for (let d = 1; d <= nDias; d++) header.push(d);
-  header.push('Real', 'Óptimo', 'Cumpl%');
   const hRow = ws.getRow(HEADER_ROW);
   header.forEach((h, i) => { hRow.getCell(i + 1).value = h; });
   hRow.eachCell((cell) => {
@@ -583,8 +586,15 @@ function agregarHojaResumenInfaltables(wb, resumen) {
     const prods = dep.productos || [];
     if (!prods.length) continue;
     const startRow = rowIdx;
-    for (const p of prods) {
+    // Ordenar por cumplimiento de menor a mayor (los sin dato, al final)
+    const prodsOrden = [...prods].sort((a, b) => {
+      const ca = a.cumpl == null ? Infinity : a.cumpl;
+      const cb = b.cumpl == null ? Infinity : b.cumpl;
+      return ca - cb;
+    });
+    for (const p of prodsOrden) {
       const row = ws.getRow(rowIdx);
+      const bajo = p.cumpl != null && p.cumpl < UMBRAL;
       row.getCell(2).value = p.barra || '';
       row.getCell(3).value = p.nombre;
       for (let d = 1; d <= nDias; d++) {
@@ -594,19 +604,31 @@ function agregarHojaResumenInfaltables(wb, resumen) {
         cell.alignment = { horizontal: 'center' };
         if (v === 0) cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
       }
-      const cReal = row.getCell(colReal);
-      cReal.value = p.real;
-      cReal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-      cReal.font = { bold: true };
-      cReal.alignment = { horizontal: 'center' };
-      const cOpt = row.getCell(colOptimo);
-      cOpt.value = p.optimo;
-      cOpt.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-      cOpt.alignment = { horizontal: 'center' };
       const cCumpl = row.getCell(colCumpl);
       if (p.cumpl != null) { cCumpl.value = p.cumpl; cCumpl.numFmt = '0%'; }
       else cCumpl.value = 's/d';
       cCumpl.alignment = { horizontal: 'center' };
+      cCumpl.font = { bold: true };
+      const cReal = row.getCell(colReal);
+      cReal.value = p.real;
+      cReal.alignment = { horizontal: 'center' };
+      cReal.font = { bold: true };
+      const cOpt = row.getCell(colOptimo);
+      cOpt.value = p.optimo;
+      cOpt.alignment = { horizontal: 'center' };
+
+      if (bajo) {
+        // Fila bajo el umbral: fondo rojo + letra blanca (cols 2..fin; la col 1 va fusionada)
+        for (let c = 2; c <= totalCols; c++) {
+          const cell = row.getCell(c);
+          cell.fill = RED;
+          const prev = cell.font || {};
+          cell.font = { ...prev, bold: prev.bold || c === colCumpl || c === colReal, color: { argb: WHITE } };
+        }
+      } else {
+        cReal.fill = YELLOW;
+        cOpt.fill = YELLOW;
+      }
       for (let c = 1; c <= totalCols; c++) row.getCell(c).border = borde();
       rowIdx++;
     }
