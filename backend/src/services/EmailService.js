@@ -793,6 +793,60 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
  * combinado por PLU. Se dispara cuando ambos pedidos del día están completos.
  * items: { tienda: [{pro_codigo_plu, pro_nombre_producto, cantidad}], local: [...] }
  */
+/** Fecha de PRODUCCIÓN (mañana) en formato YYYY-MM-DD, hora local del servidor. */
+function fechaMananaLocal() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Envía el MISMO Excel del pedido unido Teja Food al KDS (Kitchen Manager),
+ * para que la cocina lo vea en pantalla. Idempotente en el KDS (upsert).
+ * Resiliente: cualquier fallo (KDS caído/timeout/config faltante) solo se loguea;
+ * NUNCA lanza, para no romper el correo ni el flujo de la revisión.
+ */
+async function enviarPedidoAlKDS(excelBuffer) {
+  const base = process.env.KITCHEN_API_URL;
+  const apiKey = process.env.KITCHEN_API_KEY;
+  if (!base || !apiKey) {
+    console.error('[KDS] Omitido: falta KITCHEN_API_URL o KITCHEN_API_KEY en el .env');
+    return;
+  }
+  const fecha = fechaMananaLocal();
+  const url = `${base.replace(/\/+$/, '')}/api/integrations/planificacion`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s máx
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ fecha, fileData: Buffer.from(excelBuffer).toString('base64') }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      console.error(`[KDS] Respuesta ${resp.status} al enviar planificación ${fecha}: ${txt.slice(0, 300)}`);
+      return;
+    }
+    const data = await resp.json().catch(() => null);
+    if (data && data.success) {
+      const errCount = Array.isArray(data.errores) ? data.errores.length : 0;
+      console.log(`[KDS] Planificación ${fecha} enviada ✓ — ${data.guardados ?? '?'} producto(s) guardados`
+        + (errCount ? ` · ${errCount} error(es): ${JSON.stringify(data.errores).slice(0, 300)}` : ''));
+    } else {
+      console.error(`[KDS] Planificación ${fecha} sin success:`, JSON.stringify(data));
+    }
+  } catch (err) {
+    console.error(`[KDS] No se pudo enviar la planificación al Kitchen Manager (${fecha}):`, err.message);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
   const destinatario = process.env.EMAIL_TEJAFOOD_UNIDO || 'jeanpaulgame@tejamarket.cl';
 
@@ -870,7 +924,11 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
     }],
   });
 
+  // Además del correo: enviar el MISMO Excel al KDS (Kitchen Manager) para la cocina.
+  // Resiliente: si falla, no afecta el correo ni la revisión (solo loguea).
+  await enviarPedidoAlKDS(excelBuffer);
+
   return { enviado: true, destinatario, productos: filas.length };
 }
 
-module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, generarExcelResumenInfaltables, enviarPedidoUnidoTejaFood };
+module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, generarExcelResumenInfaltables, enviarPedidoUnidoTejaFood, enviarPedidoAlKDS };
