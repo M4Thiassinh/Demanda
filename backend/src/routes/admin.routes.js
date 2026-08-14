@@ -121,6 +121,7 @@ router.delete('/admin/usuarios/:id',      ctrl.eliminarUsuario);
 router.get('/admin/config/:depId',        ctrl.obtenerConfig);
 router.put('/admin/config/:depId',        ctrl.actualizarConfig);
 router.post('/admin/csv-upload',          upload.single('file'), ctrl.subirCSV);
+router.post('/admin/actualizar-demanda-ventas', ctrl.actualizarDemandaDesdeVentas);
 router.get('/admin/productos/:plu',       ctrl.obtenerProducto);
 router.put('/admin/productos/:plu',       ctrl.actualizarProducto);
 router.get('/admin/clasificacion',        ctrl.listarClasificacion);

@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Script local de desarrollo (tiene credenciales del servidor, NO subir)
+backend/scripts/refrescar-demanda-local.js
+
 # Node modules
 node_modules/
 

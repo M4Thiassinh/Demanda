@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
-import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, getClasificacion, clasificacionBulk } from '../api'
+import Swal from 'sweetalert2'
+import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, actualizarDemandaVentas, getClasificacion, clasificacionBulk } from '../api'
 import MasterAdminPanel from '../components/admin/MasterAdminPanel'
 import Logo from '../components/Logo'
 
@@ -152,7 +153,38 @@ function CsvTab() {
   const [error, setError]        = useState('')
   const [drag, setDrag]          = useState(false)
 
+  // Actualización automática de demanda desde ventas
+  const [diasVentas, setDiasVentas]   = useState(30)
+  const [depVentas, setDepVentas]     = useState('')
+  const [agregarNuevos, setAgregarNuevos] = useState(false)
+  const [loadingVentas, setLoadingV]  = useState(false)
+  const [resVentas, setResVentas]     = useState(null)
+
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
+
+  const actualizarDesdeVentas = async () => {
+    const scope = depVentas
+      ? (departamentos.find(d => String(d.dep_id) === String(depVentas))?.dep_nombre || 'ese departamento')
+      : 'TODOS los departamentos'
+    const conf = await Swal.fire({
+      title: '¿Actualizar demanda desde ventas?',
+      html: `Se recalculará la venta de <b>${scope}</b> con las ventas reales de los últimos <b>${diasVentas}</b> días.<br/><span style="color:#f59e0b">Los productos sin ventas en el período quedarán en 0.</span>${agregarNuevos ? '<br/><b style="color:#a6c63c">También se agregarán los productos nuevos vendidos</b> (Teja Food incluido, según su caja).' : ''}`,
+      icon: 'warning', background: '#1b2520', color: '#fff',
+      showCancelButton: true, confirmButtonText: 'Sí, actualizar', cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#8aa62f', cancelButtonColor: '#4b5563',
+    })
+    if (!conf.isConfirmed) return
+    setLoadingV(true); setResVentas(null)
+    try {
+      const data = await actualizarDemandaVentas(Number(diasVentas), depVentas || undefined, agregarNuevos)
+      setResVentas(data)
+      Swal.fire({ icon: 'success', title: 'Demanda actualizada',
+        text: `${data.con_venta} con venta · ${data.en_cero} en 0${data.agregados ? ` · ${data.agregados} nuevos` : ''} · ${data.dias} días`,
+        timer: 3200, showConfirmButton: false, background: '#1b2520', color: '#fff' })
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo actualizar', 'error')
+    } finally { setLoadingV(false) }
+  }
 
   const setFile = (f) => (f?.name.endsWith('.csv') || f?.name.endsWith('.xlsx')) ? (setArchivo(f), setError('')) : setError('Solo archivos .csv o .xlsx')
 
@@ -169,6 +201,50 @@ function CsvTab() {
 
   return (
     <div className="space-y-4">
+      {/* Actualización automática desde ventas — reemplaza el CSV manual */}
+      <div className="card p-4 space-y-3 border border-brand-500/40">
+        <div>
+          <p className="text-white font-bold text-sm">⚡ Actualizar demanda desde ventas</p>
+          <p className="text-gray-400 text-xs">Recalcula la venta de los productos con las ventas reales de los últimos N días <b>completos</b> (sin contar hoy), directo de la base. Reemplaza el CSV manual — sirve para todos los departamentos de una vez.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Días de venta</label>
+            <input type="number" min={1} max={365} value={diasVentas} onChange={e => setDiasVentas(e.target.value)} className="input-field" />
+          </div>
+          <div>
+            <label className="label">Departamento</label>
+            <select value={depVentas} onChange={e => setDepVentas(e.target.value)} className="input-field">
+              <option value="">— Todos —</option>
+              {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
+            </select>
+          </div>
+        </div>
+        <label className="flex items-start gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={agregarNuevos} onChange={e => setAgregarNuevos(e.target.checked)}
+            className="mt-0.5 w-4 h-4 rounded bg-gray-800 border-gray-600 accent-brand-500" />
+          <span className="text-gray-300 text-xs">
+            <b>También agregar productos nuevos vendidos</b> (que no están en el catálogo).
+            <span className="text-gray-500"> Teja Food se asigna según la caja de venta (Local/Sala).</span>
+          </span>
+        </label>
+        {resVentas && (
+          <div className={`grid ${resVentas.agregados ? 'grid-cols-4' : 'grid-cols-3'} gap-2 text-center`}>
+            {[['Productos', resVentas.productos, 'text-white'], ['Con venta', resVentas.con_venta, 'text-brand-400'], ['En 0', resVentas.en_cero, 'text-gray-400'],
+              ...(resVentas.agregados ? [['Nuevos', resVentas.agregados, 'text-emerald-400']] : [])].map(([l, v, c]) => (
+              <div key={l} className="bg-gray-900 rounded-xl p-2"><p className={`text-xl font-black ${c}`}>{v}</p><p className="text-gray-500 text-[11px]">{l}</p></div>
+            ))}
+          </div>
+        )}
+        <button onClick={actualizarDesdeVentas} disabled={loadingVentas} className="btn-primary w-full disabled:opacity-40">
+          {loadingVentas ? '⏳ Actualizando…' : '⚡ Actualizar demanda ahora'}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3 text-gray-500 text-xs">
+        <div className="flex-1 h-px bg-gray-700/60" /> o carga manual por archivo <div className="flex-1 h-px bg-gray-700/60" />
+      </div>
+
       <div>
         <label className="label">Departamento</label>
         <select id="csv-dep" value={depSel} onChange={e => setDepSel(e.target.value)} className="input-field">

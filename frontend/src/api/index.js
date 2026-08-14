@@ -63,6 +63,7 @@ export const getProductosLista = (depId, categoria) => api.get('/productos-lista
 export const getConfig = (depId) => api.get(`/admin/config/${depId}`).then(r => r.data)
 export const updateConfig = (depId, data) => api.put(`/admin/config/${depId}`, data).then(r => r.data)
 export const subirCSV = (fd) => api.post('/admin/csv-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+export const actualizarDemandaVentas = (dias, depId, agregarNuevos) => api.post('/admin/actualizar-demanda-ventas', { dias, dep_id: depId || undefined, agregar_nuevos: !!agregarNuevos }).then(r => r.data)
 export const getProducto = (plu, depId) => api.get(`/admin/productos/${plu}`, { params: { dep_id: depId } }).then(r => r.data)
 export const updateProducto = (plu, depId, data) => api.put(`/admin/productos/${plu}`, { ...data, dep_id: depId }).then(r => r.data)
 export const exportarExcel = (params) => api.get('/admin/export', { params, responseType: 'blob' })

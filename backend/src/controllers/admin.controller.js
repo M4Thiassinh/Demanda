@@ -559,11 +559,133 @@ async function eliminarUsuario(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// POST /api/admin/actualizar-demanda-ventas  { dias?, dep_id? }
+// Recalcula vta_total_periodo de los productos con las ventas reales de los
+// últimos N días (base analítica db_analitica_supermercado.fact_ventas) y fija
+// dias_historial = N. Productos sin ventas en el período → 0. Reemplaza la
+// carga manual por CSV. Actualiza todos los departamentos (o uno si viene dep_id).
+// Teja Food: Local (1347) y Sala (2347) venden los MISMOS productos; se
+// diferencian por la caja → unidad_negocio de la venta. Se separan así:
+//   1347 Local → 'TEJA FOOD TIENDA'   ·   2347 Sala → 'TEJA FOOD SALA'
+const TEJAFOOD_UNIDAD = { '1347': 'TEJA FOOD TIENDA', '2347': 'TEJA FOOD SALA' };
+const TEJAFOOD_DEPS = Object.keys(TEJAFOOD_UNIDAD);
+
+async function actualizarDemandaDesdeVentas(req, res) {
+  try {
+    let dias = parseInt(req.body?.dias, 10);
+    if (!Number.isFinite(dias) || dias < 1 || dias > 365) dias = 30;
+    const depId = (req.body?.dep_id && String(req.body.dep_id).trim()) || null;
+    const agregarNuevos = req.body?.agregar_nuevos === true || req.body?.agregar_nuevos === 'true' || req.body?.agregar_nuevos === 1;
+    let afectados = 0, agregados = 0;
+
+    // 1) Departamentos normales (todos menos Teja Food): suma TODAS las ventas del PLU.
+    if (!depId || !TEJAFOOD_DEPS.includes(depId)) {
+      const { rows: r1 } = await db.query(
+        `UPDATE productos p
+           LEFT JOIN (
+             SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+              GROUP BY fv.pro_codigo_plu
+           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+          WHERE p.dep_id NOT IN ('1347','2347') AND (? IS NULL OR p.dep_id = ?)`,
+        [dias, dias, depId, depId]
+      );
+      afectados += r1.affectedRows;
+    }
+
+    // 2) Teja Food (1347/2347): separa las ventas por unidad_negocio según el depto.
+    if (!depId || TEJAFOOD_DEPS.includes(depId)) {
+      const { rows: r2 } = await db.query(
+        `UPDATE productos p
+           LEFT JOIN (
+             SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+                AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
+              GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
+           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
+              AND v.unidad_negocio = CASE p.dep_id WHEN '1347' THEN 'TEJA FOOD TIENDA' WHEN '2347' THEN 'TEJA FOOD SALA' END
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+          WHERE p.dep_id IN ('1347','2347') AND (? IS NULL OR p.dep_id = ?)`,
+        [dias, dias, depId, depId]
+      );
+      afectados += r2.affectedRows;
+    }
+
+    // 3) (Opcional) Agregar productos NUEVOS vendidos que no están en el catálogo.
+    //    - Deptos normales: se asigna por nombre (dim_productos.dep_nombre → demanda).
+    //    - Teja Food: se asigna por la CAJA de venta (unidad_negocio):
+    //        TIENDA → Local (1347) · SALA → Sala (2347). Si vende en ambas, se crea en las dos.
+    if (agregarNuevos) {
+      const { rows: ins } = await db.query(
+        `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
+         SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?, d.dep_id
+           FROM (
+             SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+                AND fv.pro_codigo_plu IS NOT NULL
+              GROUP BY fv.pro_codigo_plu
+           ) v
+           JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
+           JOIN departamentos d ON d.dep_nombre COLLATE utf8mb4_0900_ai_ci = dp.dep_nombre COLLATE utf8mb4_0900_ai_ci
+           LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu AND p2.dep_id = d.dep_id
+          WHERE p2.pro_codigo_plu IS NULL
+            AND d.dep_id NOT IN ('1347','2347')
+            AND (? IS NULL OR d.dep_id = ?)`,
+        [dias, dias, depId, depId]
+      );
+      agregados += ins.affectedRows;
+
+      // 3b) Teja Food: los nuevos se asignan por la CAJA de venta (unidad_negocio).
+      //     TIENDA → Local (1347) · SALA → Sala (2347). Vendido en ambas → se crea en las dos.
+      const { rows: insTF } = await db.query(
+        `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
+         SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?,
+                CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
+           FROM (
+             SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+                AND fv.pro_codigo_plu IS NOT NULL
+                AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
+              GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
+           ) v
+           JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
+           LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu
+              AND p2.dep_id = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
+          WHERE p2.pro_codigo_plu IS NULL
+            AND (? IS NULL OR ? = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END)`,
+        [dias, dias, depId, depId]
+      );
+      agregados += insTF.affectedRows;
+    }
+
+    const { rows } = await db.query(
+      `SELECT COUNT(*) AS total, SUM(vta_total_periodo > 0) AS con_venta
+         FROM productos WHERE (? IS NULL OR dep_id = ?)`,
+      [depId, depId]
+    );
+    const total = Number(rows[0].total) || 0;
+    const conVenta = Number(rows[0].con_venta) || 0;
+    res.json({ ok: true, dias, productos: total, con_venta: conVenta, en_cero: total - conVenta, afectados, agregados });
+  } catch (err) {
+    console.error('[actualizarDemandaDesdeVentas]', err.message);
+    res.status(500).json({ error: 'No se pudo actualizar la demanda desde ventas: ' + err.message });
+  }
+}
+
 module.exports = {
   listarDepartamentos, crearDepartamento, actualizarDepartamento,
   listarUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario,
   obtenerConfig, actualizarConfig,
-  subirCSV,
+  subirCSV, actualizarDemandaDesdeVentas,
   buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
   listarClasificacion, clasificarBulk,
   obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, exportarMasterExcel
