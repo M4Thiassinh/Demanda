@@ -847,7 +847,7 @@ async function enviarPedidoAlKDS(excelBuffer) {
   }
 }
 
-async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
+async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, kds = true }) {
   const destinatario = process.env.EMAIL_TEJAFOOD_UNIDO || 'jeanpaulgame@tejamarket.cl';
 
   const fechaStr = new Date(fecha).toLocaleString('es-CL', {
@@ -912,23 +912,29 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios }) {
 
   const excelBuffer = await generarExcelPedidoUnidoTejaFood(filas, fecha);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
-    to:   destinatario,
-    subject: `[Teja Food] Pedido unido Sala + Tienda — ${filas.length} producto(s)`,
-    html,
-    attachments: [{
-      filename: `pedido_unido_tejafood.xlsx`,
-      content: excelBuffer,
-      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    }],
-  });
+  // Correo a Jean — opcional. Hoy se envía UNA vez al día (tarea programada),
+  // con el total del día; no en cada finalización.
+  if (correo) {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to:   destinatario,
+      subject: `[Teja Food] Pedido unido Sala + Tienda — ${filas.length} producto(s)`,
+      html,
+      attachments: [{
+        filename: `pedido_unido_tejafood.xlsx`,
+        content: excelBuffer,
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }],
+    });
+  }
 
-  // Además del correo: enviar el MISMO Excel al KDS (Kitchen Manager) para la cocina.
-  // Resiliente: si falla, no afecta el correo ni la revisión (solo loguea).
-  await enviarPedidoAlKDS(excelBuffer);
+  // KDS (Kitchen Manager) — opcional. Se actualiza en CADA finalización con el
+  // total del día (upsert por fecha). Resiliente: si falla, solo loguea.
+  if (kds) {
+    await enviarPedidoAlKDS(excelBuffer);
+  }
 
-  return { enviado: true, destinatario, productos: filas.length };
+  return { enviado: correo, destinatario, productos: filas.length, correo, kds };
 }
 
 module.exports = { enviarOrdenProduccion, generarExcel, generarExcelReposicion, generarExcelPluCantidad, enviarReporteInfaltables, generarExcelInfaltables, enviarReporteTurnoInfaltables, generarExcelInfaltablesTurno, generarExcelResumenInfaltables, enviarPedidoUnidoTejaFood, enviarPedidoAlKDS };

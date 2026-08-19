@@ -51,3 +51,32 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   → Desde la red local: http://TU_IP:${PORT}`);
 });
 
+// ── Tarea programada: correo diario Teja Food a Jean ──────────
+// Envía UNA vez al día el pedido unido (suma del día). El KDS se actualiza en
+// tiempo real en cada finalización; esto es solo el correo. Hora configurable
+// por env (TEJAFOOD_HORA_CORREO / TEJAFOOD_MIN_CORREO), zona horaria de Chile.
+const { enviarCorreoDiarioTejaFood } = require('./controllers/revision.controller');
+(function iniciarCorreoDiarioTejaFood() {
+  const HORA = parseInt(process.env.TEJAFOOD_HORA_CORREO || '21', 10);
+  const MIN  = parseInt(process.env.TEJAFOOD_MIN_CORREO  || '0', 10);
+  let ultimoEnvio = null; // 'YYYY-MM-DD' ya enviado (evita doble envío)
+  const chequear = async () => {
+    try {
+      const partes = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date());
+      const val = (t) => partes.find((x) => x.type === t)?.value;
+      const hoy = `${val('year')}-${val('month')}-${val('day')}`;
+      const h = parseInt(val('hour'), 10), m = parseInt(val('minute'), 10);
+      if (h === HORA && m === MIN && ultimoEnvio !== hoy) {
+        ultimoEnvio = hoy;
+        console.log(`[TejaFood] Disparando correo diario (${hoy} ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')})…`);
+        await enviarCorreoDiarioTejaFood();
+      }
+    } catch (e) { console.error('[TejaFood] Error en tarea programada:', e.message); }
+  };
+  setInterval(chequear, 60 * 1000);
+  console.log(`⏰ Correo diario Teja Food programado ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')} (America/Santiago)`);
+})();
+

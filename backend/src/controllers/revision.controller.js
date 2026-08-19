@@ -3,8 +3,10 @@ const ConfigService             = require('../services/ConfigService');
 const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalculatorService');
 const { enviarOrdenProduccion, enviarPedidoUnidoTejaFood } = require('../services/EmailService');
 
-// Departamentos Teja Food: cuando AMBOS pedidos del día están completos,
-// se envía un correo unido (Tienda + Local) combinado por PLU.
+// Departamentos Teja Food: cuando AMBOS deptos tienen al menos un pedido del día,
+// se envía un correo unido (Tienda + Local) con la SUMA de TODOS los pedidos del
+// día por PLU. Se re-envía en cada finalización con el total acumulado (el KDS
+// hace upsert por fecha, así que siempre queda el total más completo del día).
 const TEJAFOOD_LOCAL  = '1347'; // Local Teja Food
 const TEJAFOOD_TIENDA = '2347'; // Sala / Tienda Teja Food
 
@@ -13,58 +15,81 @@ const TEJAFOOD_TIENDA = '2347'; // Sala / Tienda Teja Food
  * tiene un pedido completado hoy, envía el correo unido a Jean Paul.
  * No lanza: cualquier fallo se registra en log para no afectar el pedido principal.
  */
+// Construye el pedido combinado del DÍA: suma de TODOS los pedidos completados
+// hoy por depto Teja Food, combinado por PLU. Devuelve null si algún depto no
+// tiene pedidos hoy (se requiere que AMBOS tengan al menos uno).
+async function construirPedidoDiaTejaFood() {
+  const { rows: resumen } = await db.query(
+    `SELECT dep_id, COUNT(*) AS n
+       FROM revisiones
+      WHERE rev_estado = 'completada'
+        AND dep_id IN (?, ?)
+        AND DATE(rev_fecha) = CURDATE()
+      GROUP BY dep_id`,
+    [TEJAFOOD_LOCAL, TEJAFOOD_TIENDA]
+  );
+  const nLocal  = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_LOCAL)?.n || 0);
+  const nTienda = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_TIENDA)?.n || 0);
+  if (!nLocal || !nTienda) return null;
+
+  const itemsDelDia = async (depId) => {
+    const { rows: det } = await db.query(
+      `SELECT dr.pro_codigo_plu, p.pro_nombre_producto, SUM(dr.det_cantidad_pedir) AS cantidad
+         FROM revisiones r
+         JOIN detalle_revision dr ON dr.rev_id = r.rev_id
+         JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
+        WHERE r.dep_id = ?
+          AND r.rev_estado = 'completada'
+          AND DATE(r.rev_fecha) = CURDATE()
+          AND dr.det_cantidad_pedir > 0
+        GROUP BY dr.pro_codigo_plu, p.pro_nombre_producto
+        ORDER BY p.pro_nombre_producto`,
+      [depId]
+    );
+    return det;
+  };
+  const [itemsLocal, itemsTienda] = await Promise.all([
+    itemsDelDia(TEJAFOOD_LOCAL),
+    itemsDelDia(TEJAFOOD_TIENDA),
+  ]);
+  return { itemsLocal, itemsTienda, nLocal, nTienda };
+}
+
+// En CADA finalización de un pedido Teja Food: actualiza el KDS con el total del
+// día (sin correo). El correo a Jean se manda UNA vez al día (ver enviarCorreoDiarioTejaFood).
 async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
   const depId = String(depIdFinalizado);
   if (depId !== TEJAFOOD_LOCAL && depId !== TEJAFOOD_TIENDA) return;
-
   try {
-    // Última revisión completada HOY de cada depto Teja Food.
-    const { rows } = await db.query(
-      `SELECT r.dep_id, r.rev_id, r.rev_folio, r.rev_fecha
-         FROM revisiones r
-         JOIN (
-           SELECT dep_id, MAX(rev_fecha) AS max_fecha
-             FROM revisiones
-            WHERE rev_estado = 'completada'
-              AND dep_id IN (?, ?)
-              AND DATE(rev_fecha) = CURDATE()
-            GROUP BY dep_id
-         ) ult ON ult.dep_id = r.dep_id AND ult.max_fecha = r.rev_fecha
-        WHERE r.rev_estado = 'completada'`,
-      [TEJAFOOD_LOCAL, TEJAFOOD_TIENDA]
-    );
-
-    const revLocal  = rows.find((r) => String(r.dep_id) === TEJAFOOD_LOCAL);
-    const revTienda = rows.find((r) => String(r.dep_id) === TEJAFOOD_TIENDA);
-
-    // Solo se envía cuando AMBOS pedidos del día están completos.
-    if (!revLocal || !revTienda) return;
-
-    const itemsDe = async (revId, depId) => {
-      const { rows: det } = await db.query(
-        `SELECT dr.pro_codigo_plu, p.pro_nombre_producto, dr.det_cantidad_pedir AS cantidad
-           FROM detalle_revision dr
-           JOIN productos p ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = ?
-          WHERE dr.rev_id = ? AND dr.det_cantidad_pedir > 0
-          ORDER BY p.pro_nombre_producto`,
-        [depId, revId]
-      );
-      return det;
-    };
-
-    const [itemsLocal, itemsTienda] = await Promise.all([
-      itemsDe(revLocal.rev_id, TEJAFOOD_LOCAL),
-      itemsDe(revTienda.rev_id, TEJAFOOD_TIENDA),
-    ]);
-
+    const pedido = await construirPedidoDiaTejaFood();
+    if (!pedido) return;
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
-      items: { local: itemsLocal, tienda: itemsTienda },
-      folios: { local: revLocal.rev_folio, tienda: revTienda.rev_folio },
+      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda },
+      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día` },
+      correo: false, kds: true,
     });
-    console.log(`[TejaFood] Correo unido enviado a ${r.destinatario} — ${r.productos} producto(s)`);
+    console.log(`[TejaFood] KDS actualizado — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda} pedidos del día)`);
   } catch (err) {
-    console.error('[TejaFood] No se pudo enviar el correo unido:', err.message);
+    console.error('[TejaFood] No se pudo actualizar el KDS:', err.message);
+  }
+}
+
+// Tarea programada (una vez al día): envía a Jean UN solo correo con el total del
+// día. El KDS ya se fue actualizando en tiempo real en cada finalización.
+async function enviarCorreoDiarioTejaFood() {
+  try {
+    const pedido = await construirPedidoDiaTejaFood();
+    if (!pedido) { console.log('[TejaFood] Correo diario omitido: algún depto Teja Food sin pedidos hoy'); return; }
+    const r = await enviarPedidoUnidoTejaFood({
+      fecha: new Date(),
+      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda },
+      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día` },
+      correo: true, kds: false,
+    });
+    console.log(`[TejaFood] Correo diario enviado a ${r.destinatario} — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda} pedidos)`);
+  } catch (err) {
+    console.error('[TejaFood] No se pudo enviar el correo diario:', err.message);
   }
 }
 
@@ -404,4 +429,4 @@ async function eliminarDetalle(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-module.exports = { buscarRevisionActiva, iniciarRevision, agregarDetalle, agregarDetalleBulk, calcularItem, obtenerNoEscaneados, finalizarRevision, obtenerRevision, eliminarDetalle };
+module.exports = { buscarRevisionActiva, iniciarRevision, agregarDetalle, agregarDetalleBulk, calcularItem, obtenerNoEscaneados, finalizarRevision, obtenerRevision, eliminarDetalle, enviarCorreoDiarioTejaFood };
