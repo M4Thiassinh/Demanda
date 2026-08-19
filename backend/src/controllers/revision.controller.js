@@ -248,7 +248,7 @@ async function obtenerNoEscaneados(req, res) {
     //  - categoría (normal/especial) según el perfil
     //  - día de elaboración: solo aparece si hoy (zona Santiago) es uno de sus días,
     //    o si no tiene días asignados (entonces aparece siempre).
-    const cond = ['p.dep_id = ?'];
+    const cond = ['p.dep_id = ?', 'p.pro_activo = 1'];
     const condParams = [rev.dep_id];
     if (categoria) { cond.push('p.pro_categoria = ?'); condParams.push(categoria); }
     const hoy = diaSemanaSantiago(rev.rev_fecha ? new Date(rev.rev_fecha) : new Date());

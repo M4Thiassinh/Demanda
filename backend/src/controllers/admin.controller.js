@@ -111,6 +111,7 @@ async function buscarProductos(req, res) {
               pro_dias_elaboracion, pro_cantidad_minima
          FROM productos
         WHERE dep_id = ?
+          AND pro_activo = 1
           AND (pro_nombre_producto LIKE ? OR pro_codigo_plu LIKE ? OR pro_codigo_barra LIKE ?)
           ${categoria ? 'AND pro_categoria = ?' : ''}
           ${hoy ? "AND (pro_dias_elaboracion IS NULL OR pro_dias_elaboracion = '' OR FIND_IN_SET(?, pro_dias_elaboracion))" : ''}
@@ -371,9 +372,9 @@ async function obtenerMasterProductos(req, res) {
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial, dep_id,
               pro_dias_produccion_override, pro_dias_seguridad_override,
-              pro_dias_elaboracion, pro_cantidad_minima
+              pro_dias_elaboracion, pro_cantidad_minima, pro_activo
          FROM productos WHERE dep_id = ?
-        ORDER BY pro_nombre_producto`,
+        ORDER BY pro_activo DESC, pro_nombre_producto`,
       [dep_id]
     );
 
@@ -473,6 +474,26 @@ async function eliminarMasterProductosBulk(req, res) {
     res.status(500).json({ error: 'No se pudieron eliminar los productos' });
   } finally {
     if (connection) connection.release();
+  }
+}
+
+// POST /api/admin/master-productos/activar  { dep_id, plus: [...], activo: 0|1 }
+// Activa o desactiva productos en lote. Los desactivados no aparecen en el
+// escaneo de sala del operador, pero siguen en la base (se pueden reactivar).
+async function activarProductosBulk(req, res) {
+  try {
+    const { dep_id, plus, activo } = req.body;
+    if (!dep_id || !Array.isArray(plus) || plus.length === 0) return res.status(400).json({ error: 'Datos inválidos' });
+    const val = (activo === 0 || activo === false || activo === '0') ? 0 : 1;
+    const placeholders = plus.map(() => '?').join(',');
+    const { rows } = await db.query(
+      `UPDATE productos SET pro_activo = ? WHERE dep_id = ? AND pro_codigo_plu IN (${placeholders})`,
+      [val, dep_id, ...plus]
+    );
+    res.json({ ok: true, activo: val, afectados: rows.affectedRows });
+  } catch (err) {
+    console.error('[activarProductosBulk]', err.message);
+    res.status(500).json({ error: 'No se pudo cambiar el estado de los productos' });
   }
 }
 
@@ -688,5 +709,5 @@ module.exports = {
   subirCSV, actualizarDemandaDesdeVentas,
   buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
   listarClasificacion, clasificarBulk,
-  obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, exportarMasterExcel
+  obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, activarProductosBulk, exportarMasterExcel
 };

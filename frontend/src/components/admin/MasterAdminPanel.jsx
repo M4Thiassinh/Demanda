@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Swal from 'sweetalert2';
-import { getDepartamentos, getMasterProductos, bulkUpdateProductos, bulkDeleteProductos, exportMasterExcel, loginMaster } from '../../api';
+import { getDepartamentos, getMasterProductos, bulkUpdateProductos, bulkDeleteProductos, activarProductos, exportMasterExcel, loginMaster } from '../../api';
 
 export default function MasterAdminPanel() {
   // Autenticación Master
@@ -194,6 +194,30 @@ export default function MasterAdminPanel() {
     }
   };
 
+  const handleSetActivo = async (activo) => {
+    const plus = Array.from(selected).filter(plu => !plu.startsWith('nuevo_'));
+    if (plus.length === 0) return Swal.fire('Sin selección', 'Selecciona productos ya guardados.', 'info');
+    const accion = activo ? 'activar' : 'desactivar';
+    const res = await Swal.fire({
+      title: `¿${activo ? 'Activar' : 'Desactivar'} productos?`,
+      html: activo
+        ? `Se activarán <b>${plus.length}</b> producto(s): volverán a aparecer al escanear en sala.`
+        : `Se desactivarán <b>${plus.length}</b> producto(s): <b>no aparecerán</b> al escanear en sala (no se eliminan, se pueden reactivar).`,
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: `Sí, ${accion}`, cancelButtonText: 'Cancelar',
+      confirmButtonColor: activo ? '#059669' : '#d97706',
+    });
+    if (!res.isConfirmed) return;
+    try {
+      setLoading(true);
+      await activarProductos(depSel, plus, activo ? 1 : 0);
+      Swal.fire('Listo', `Productos ${activo ? 'activados' : 'desactivados'}.`, 'success');
+      fetchProductos();
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo cambiar el estado', 'error');
+    } finally { setLoading(false); }
+  };
+
   const handleExport = async () => {
     if (!depSel) return;
     try {
@@ -330,6 +354,18 @@ export default function MasterAdminPanel() {
               </button>
               
               {selected.size > 0 && (
+                <button onClick={() => handleSetActivo(false)} className="btn-primary py-2 px-4 text-sm whitespace-nowrap bg-amber-600 hover:bg-amber-500">
+                  🚫 Desactivar ({selected.size})
+                </button>
+              )}
+
+              {selected.size > 0 && (
+                <button onClick={() => handleSetActivo(true)} className="btn-primary py-2 px-4 text-sm whitespace-nowrap bg-emerald-600 hover:bg-emerald-500">
+                  ✅ Activar ({selected.size})
+                </button>
+              )}
+
+              {selected.size > 0 && (
                 <button onClick={handleDeleteSelected} className="btn-primary py-2 px-4 text-sm whitespace-nowrap bg-rose-600 hover:bg-rose-500">
                   🗑 Eliminar ({selected.size})
                 </button>
@@ -390,7 +426,7 @@ export default function MasterAdminPanel() {
                     const isSelected = selected.has(localId);
 
                     return (
-                      <tr key={localId} className={`border-b border-gray-800 hover:bg-gray-800/50 transition-colors ${isEdited ? 'bg-brand-900/10' : ''}`}>
+                      <tr key={localId} className={`border-b border-gray-800 hover:bg-gray-800/50 transition-colors ${isEdited ? 'bg-brand-900/10' : ''} ${current.pro_activo === 0 ? 'opacity-50' : ''}`}>
                         <td className="p-3 text-center">
                           <input 
                             type="checkbox" 
@@ -401,6 +437,9 @@ export default function MasterAdminPanel() {
                         </td>
                         <td className="p-3 font-mono text-gray-400">
                           {current.pro_codigo_plu}
+                          {current.pro_activo === 0 && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/50 text-amber-300 text-[10px] font-sans font-semibold">desactivado</span>
+                          )}
                         </td>
                         <td className="p-2">
                           <input 

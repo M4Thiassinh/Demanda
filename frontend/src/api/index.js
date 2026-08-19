@@ -72,6 +72,7 @@ export const exportarExcel = (params) => api.get('/admin/export', { params, resp
 export const getMasterProductos = (depId) => api.get('/admin/master-productos', { params: { dep_id: depId } }).then(r => r.data)
 export const bulkUpdateProductos = (depId, productos) => api.post('/admin/master-productos/bulk', { dep_id: depId, productos }).then(r => r.data)
 export const bulkDeleteProductos = (depId, plus) => api.post('/admin/master-productos/delete', { dep_id: depId, plus }).then(r => r.data)
+export const activarProductos = (depId, plus, activo) => api.post('/admin/master-productos/activar', { dep_id: depId, plus, activo }).then(r => r.data)
 export const exportMasterExcel = (depId) => api.get('/admin/master-productos/export', { params: { dep_id: depId }, responseType: 'blob' })
 
 // Revisión
