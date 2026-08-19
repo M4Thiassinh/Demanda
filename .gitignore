@@ -17,3 +17,6 @@ yarn-error.log*
 # Build
 dist/
 build/
+# Excepción: el frontend/dist SÍ se versiona (el servidor no puede compilar por su Node viejo)
+!frontend/dist/
+!frontend/dist/**
