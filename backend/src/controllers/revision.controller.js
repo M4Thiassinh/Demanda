@@ -7,8 +7,9 @@ const { enviarOrdenProduccion, enviarPedidoUnidoTejaFood } = require('../service
 // se envía un correo unido (Tienda + Local) con la SUMA de TODOS los pedidos del
 // día por PLU. Se re-envía en cada finalización con el total acumulado (el KDS
 // hace upsert por fecha, así que siempre queda el total más completo del día).
-const TEJAFOOD_LOCAL  = '1347'; // Local Teja Food
-const TEJAFOOD_TIENDA = '2347'; // Sala / Tienda Teja Food
+const TEJAFOOD_LOCAL  = '1347';   // Local Teja Food  (columna "Tienda")
+const TEJAFOOD_TIENDA = '2347';   // Sala Teja Food   (columna "Sala")
+const TEJAFOOD_MARLEY = 'MARLEY'; // Marley Coffee    (columna "Marley") — opcional
 
 /**
  * Si el depto recién finalizado es Teja Food (Local o Tienda) y el OTRO también
@@ -23,13 +24,15 @@ async function construirPedidoDiaTejaFood() {
     `SELECT dep_id, COUNT(*) AS n
        FROM revisiones
       WHERE rev_estado = 'completada'
-        AND dep_id IN (?, ?)
+        AND dep_id IN (?, ?, ?)
         AND DATE(rev_fecha) = CURDATE()
       GROUP BY dep_id`,
-    [TEJAFOOD_LOCAL, TEJAFOOD_TIENDA]
+    [TEJAFOOD_LOCAL, TEJAFOOD_TIENDA, TEJAFOOD_MARLEY]
   );
   const nLocal  = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_LOCAL)?.n || 0);
   const nTienda = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_TIENDA)?.n || 0);
+  const nMarley = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_MARLEY)?.n || 0);
+  // Se requiere el par principal (Local + Sala). Marley es opcional: se suma si tiene pedidos.
   if (!nLocal || !nTienda) return null;
 
   const itemsDelDia = async (depId) => {
@@ -48,28 +51,29 @@ async function construirPedidoDiaTejaFood() {
     );
     return det;
   };
-  const [itemsLocal, itemsTienda] = await Promise.all([
+  const [itemsLocal, itemsTienda, itemsMarley] = await Promise.all([
     itemsDelDia(TEJAFOOD_LOCAL),
     itemsDelDia(TEJAFOOD_TIENDA),
+    nMarley ? itemsDelDia(TEJAFOOD_MARLEY) : Promise.resolve([]),
   ]);
-  return { itemsLocal, itemsTienda, nLocal, nTienda };
+  return { itemsLocal, itemsTienda, itemsMarley, nLocal, nTienda, nMarley };
 }
 
 // En CADA finalización de un pedido Teja Food: actualiza el KDS con el total del
 // día (sin correo). El correo a Jean se manda UNA vez al día (ver enviarCorreoDiarioTejaFood).
 async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
   const depId = String(depIdFinalizado);
-  if (depId !== TEJAFOOD_LOCAL && depId !== TEJAFOOD_TIENDA) return;
+  if (depId !== TEJAFOOD_LOCAL && depId !== TEJAFOOD_TIENDA && depId !== TEJAFOOD_MARLEY) return;
   try {
     const pedido = await construirPedidoDiaTejaFood();
     if (!pedido) return;
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
-      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda },
-      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día` },
+      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda, marley: pedido.itemsMarley },
+      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día`, marley: `${pedido.nMarley} pedido(s) del día` },
       correo: false, kds: true,
     });
-    console.log(`[TejaFood] KDS actualizado — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda} pedidos del día)`);
+    console.log(`[TejaFood] KDS actualizado — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda}, Marley: ${pedido.nMarley} pedidos del día)`);
   } catch (err) {
     console.error('[TejaFood] No se pudo actualizar el KDS:', err.message);
   }
@@ -83,11 +87,11 @@ async function enviarCorreoDiarioTejaFood() {
     if (!pedido) { console.log('[TejaFood] Correo diario omitido: algún depto Teja Food sin pedidos hoy'); return; }
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
-      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda },
-      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día` },
+      items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda, marley: pedido.itemsMarley },
+      folios: { local: `${pedido.nLocal} pedido(s) del día`, tienda: `${pedido.nTienda} pedido(s) del día`, marley: `${pedido.nMarley} pedido(s) del día` },
       correo: true, kds: false,
     });
-    console.log(`[TejaFood] Correo diario enviado a ${r.destinatario} — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda} pedidos)`);
+    console.log(`[TejaFood] Correo diario enviado a ${r.destinatario} — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda}, Marley: ${pedido.nMarley} pedidos)`);
   } catch (err) {
     console.error('[TejaFood] No se pudo enviar el correo diario:', err.message);
   }

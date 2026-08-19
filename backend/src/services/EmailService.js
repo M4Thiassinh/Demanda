@@ -758,6 +758,7 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
     { header: 'Producto', key: 'nombre', width: 42 },
     { header: 'Sala',     key: 'tienda', width: 12 },
     { header: 'Tienda',   key: 'local',  width: 12 },
+    { header: 'Marley',   key: 'marley', width: 12 },
     { header: 'Total',    key: 'total',  width: 12 },
   ];
 
@@ -773,11 +774,13 @@ async function generarExcelPedidoUnidoTejaFood(filas, fecha) {
       nombre: f.nombre,
       tienda: f.tienda || 0,
       local:  f.local || 0,
-      total:  (f.tienda || 0) + (f.local || 0),
+      marley: f.marley || 0,
+      total:  (f.tienda || 0) + (f.local || 0) + (f.marley || 0),
     });
     row.getCell('plu').alignment    = { horizontal: 'center' };
     row.getCell('tienda').alignment = { horizontal: 'center' };
     row.getCell('local').alignment  = { horizontal: 'center' };
+    row.getCell('marley').alignment = { horizontal: 'center' };
     row.getCell('total').alignment  = { horizontal: 'center' };
     row.getCell('total').font       = { bold: true };
     if (i % 2 === 0) {
@@ -859,7 +862,7 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, 
   const acumular = (lista, campo) => {
     for (const it of (lista || [])) {
       const plu = String(it.pro_codigo_plu);
-      if (!mapa.has(plu)) mapa.set(plu, { plu, nombre: it.pro_nombre_producto || '', tienda: 0, local: 0 });
+      if (!mapa.has(plu)) mapa.set(plu, { plu, nombre: it.pro_nombre_producto || '', tienda: 0, local: 0, marley: 0 });
       const reg = mapa.get(plu);
       if (!reg.nombre && it.pro_nombre_producto) reg.nombre = it.pro_nombre_producto;
       reg[campo] += Number(it.cantidad) || 0;
@@ -867,6 +870,7 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, 
   };
   acumular(items.tienda, 'tienda');
   acumular(items.local, 'local');
+  acumular(items.marley, 'marley');
 
   const filas = [...mapa.values()].sort((a, b) =>
     (a.nombre || '').toLowerCase().localeCompare((b.nombre || '').toLowerCase()));
@@ -877,7 +881,8 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, 
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;">${esc(f.nombre)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#7c3aed;">${esc(f.tienda || 0)}</td>
       <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#2563eb;">${esc(f.local || 0)}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:800;color:#0f172a;background:#f1f5f9;">${esc((f.tienda || 0) + (f.local || 0))}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:#b45309;">${esc(f.marley || 0)}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:800;color:#0f172a;background:#f1f5f9;">${esc((f.tienda || 0) + (f.local || 0) + (f.marley || 0))}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;">
@@ -891,7 +896,7 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, 
       <p style="margin:0;font-size:13px;color:#5b21b6;">
         <b>Sala + Tienda combinados</b> &nbsp;|&nbsp; <b>${filas.length}</b> producto(s) &nbsp;|&nbsp; <b>Fecha:</b> ${esc(fechaStr)}
       </p>
-      ${folios ? `<p style="margin:8px 0 0;font-size:12px;color:#6d28d9;"><b>Folios:</b> Sala ${esc(folios.tienda || '—')} · Tienda ${esc(folios.local || '—')}</p>` : ''}
+      ${folios ? `<p style="margin:8px 0 0;font-size:12px;color:#6d28d9;"><b>Pedidos del día:</b> Sala ${esc(folios.tienda || '—')} · Tienda ${esc(folios.local || '—')} · Marley ${esc(folios.marley || '—')}</p>` : ''}
     </td></tr>
     <tr><td style="padding:20px 28px;">
       <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -900,9 +905,10 @@ async function enviarPedidoUnidoTejaFood({ fecha, items, folios, correo = true, 
           <th style="padding:11px 12px;text-align:left;font-size:11px;text-transform:uppercase;">Producto</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Sala</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Tienda</th>
+          <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Marley</th>
           <th style="padding:11px 12px;text-align:center;font-size:11px;text-transform:uppercase;">Total</th>
         </tr></thead>
-        <tbody>${filasHTML || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
+        <tbody>${filasHTML || '<tr><td colspan="6" style="padding:14px;text-align:center;color:#64748b;">Sin productos pedidos</td></tr>'}</tbody>
       </table>
     </td></tr>
     <tr><td style="padding:16px 28px;background:#f8fafc;text-align:center;font-size:11px;color:#94a3b8;">
