@@ -79,12 +79,17 @@ async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
   }
 }
 
-// Tarea programada (una vez al día): envía a Jean UN solo correo con el total del
-// día. El KDS ya se fue actualizando en tiempo real en cada finalización.
+// Envío del correo consolidado del día a Jean. Lo dispara la tarea programada
+// (ver app.js): a partir de la hora de corte, reintenta cada minuto hasta que el
+// pedido del día esté COMPLETO (Local + Sala), y ahí lo manda UNA sola vez.
+// Devuelve { enviado, motivo? } para que el scheduler sepa si ya puede marcar
+// el día como enviado. El KDS ya se fue actualizando en tiempo real aparte.
 async function enviarCorreoDiarioTejaFood() {
   try {
     const pedido = await construirPedidoDiaTejaFood();
-    if (!pedido) { console.log('[TejaFood] Correo diario omitido: algún depto Teja Food sin pedidos hoy'); return; }
+    // Pedido incompleto: aún no están todos los deptos → NO es error, solo
+    // todavía no toca. El scheduler reintentará en el próximo minuto.
+    if (!pedido) return { enviado: false, motivo: 'incompleto' };
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
       items: { local: pedido.itemsLocal, tienda: pedido.itemsTienda, marley: pedido.itemsMarley },
@@ -92,8 +97,10 @@ async function enviarCorreoDiarioTejaFood() {
       correo: true, kds: false,
     });
     console.log(`[TejaFood] Correo diario enviado a ${r.destinatario} — ${r.productos} producto(s) (Local: ${pedido.nLocal}, Sala: ${pedido.nTienda}, Marley: ${pedido.nMarley} pedidos)`);
+    return { enviado: true, destinatario: r.destinatario, productos: r.productos };
   } catch (err) {
     console.error('[TejaFood] No se pudo enviar el correo diario:', err.message);
+    return { enviado: false, motivo: err.message };
   }
 }
 

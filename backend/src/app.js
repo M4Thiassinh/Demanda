@@ -53,13 +53,38 @@ app.listen(PORT, '0.0.0.0', () => {
 
 // ── Tarea programada: correo diario Teja Food a Jean ──────────
 // Envía UNA vez al día el pedido unido (suma del día). El KDS se actualiza en
-// tiempo real en cada finalización; esto es solo el correo. Hora configurable
-// por env (TEJAFOOD_HORA_CORREO / TEJAFOOD_MIN_CORREO), zona horaria de Chile.
+// tiempo real en cada finalización; esto es solo el correo. Hora de corte
+// configurable por env (TEJAFOOD_HORA_CORREO / TEJAFOOD_MIN_CORREO), zona Chile.
+//
+// A partir de la hora de corte reintenta cada minuto hasta que el pedido del día
+// esté COMPLETO (Local + Sala) y ahí lo manda. Así no se pierde aunque el
+// personal termine los pedidos pasadas las 21:00. La marca de "ya enviado hoy"
+// se guarda en BD (tabla app_estado) para que un reinicio no cause doble envío.
 const { enviarCorreoDiarioTejaFood } = require('./controllers/revision.controller');
+const db = require('./config/db');
 (function iniciarCorreoDiarioTejaFood() {
   const HORA = parseInt(process.env.TEJAFOOD_HORA_CORREO || '21', 10);
   const MIN  = parseInt(process.env.TEJAFOOD_MIN_CORREO  || '0', 10);
-  let ultimoEnvio = null; // 'YYYY-MM-DD' ya enviado (evita doble envío)
+  const CLAVE = 'tejafood_ultimo_correo';
+  let avisoEsperaDia = null; // para loguear "en espera" solo una vez por día
+
+  const yaEnviadoHoy = async (hoy) => {
+    try {
+      const { rows } = await db.query('SELECT valor FROM app_estado WHERE clave = ?', [CLAVE]);
+      return rows.length > 0 && rows[0].valor === hoy;
+    } catch (e) {
+      console.error('[TejaFood] No se pudo leer app_estado:', e.message);
+      return false; // ante la duda, no bloquear el envío
+    }
+  };
+  const marcarEnviado = async (hoy) => {
+    await db.query(
+      `INSERT INTO app_estado (clave, valor) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+      [CLAVE, hoy]
+    );
+  };
+
   const chequear = async () => {
     try {
       const partes = new Intl.DateTimeFormat('en-CA', {
@@ -69,14 +94,23 @@ const { enviarCorreoDiarioTejaFood } = require('./controllers/revision.controlle
       const val = (t) => partes.find((x) => x.type === t)?.value;
       const hoy = `${val('year')}-${val('month')}-${val('day')}`;
       const h = parseInt(val('hour'), 10), m = parseInt(val('minute'), 10);
-      if (h === HORA && m === MIN && ultimoEnvio !== hoy) {
-        ultimoEnvio = hoy;
-        console.log(`[TejaFood] Disparando correo diario (${hoy} ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')})…`);
-        await enviarCorreoDiarioTejaFood();
+
+      // Solo desde la hora de corte en adelante.
+      const enVentana = h > HORA || (h === HORA && m >= MIN);
+      if (!enVentana) return;
+      if (await yaEnviadoHoy(hoy)) return;
+
+      const r = await enviarCorreoDiarioTejaFood();
+      if (r && r.enviado) {
+        await marcarEnviado(hoy);
+        console.log(`[TejaFood] Correo diario del ${hoy} enviado y marcado (no se repetirá hoy).`);
+      } else if (r && r.motivo === 'incompleto' && avisoEsperaDia !== hoy) {
+        avisoEsperaDia = hoy;
+        console.log(`[TejaFood] ${hoy}: pedido del día aún incompleto; reintentaré cada minuto hasta que esté listo.`);
       }
     } catch (e) { console.error('[TejaFood] Error en tarea programada:', e.message); }
   };
   setInterval(chequear, 60 * 1000);
-  console.log(`⏰ Correo diario Teja Food programado ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')} (America/Santiago)`);
+  console.log(`⏰ Correo diario Teja Food: desde las ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')} se envía apenas el pedido del día esté completo (America/Santiago)`);
 })();
 
