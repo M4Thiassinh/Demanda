@@ -497,6 +497,62 @@ async function activarProductosBulk(req, res) {
   }
 }
 
+// POST /api/admin/master-productos/mover  { dep_origen, dep_destino, plus: [...] }
+// Mueve productos de un departamento a otro (cambia su dep_id). Sirve cuando un
+// producto quedó en un depto que ya no le corresponde y lo siguen pidiendo ahí.
+// El historial de revisiones NO se toca (queda asociado al depto viejo vía la
+// revisión); a futuro el producto aparece bajo el nuevo depto.
+// Si un PLU ya existe en el destino, se OMITE (no se pisa) y se informa.
+async function moverProductosBulk(req, res) {
+  let connection;
+  try {
+    const { dep_origen, dep_destino, plus } = req.body;
+    if (!dep_origen || !dep_destino || !Array.isArray(plus) || plus.length === 0) {
+      return res.status(400).json({ error: 'Datos inválidos' });
+    }
+    if (String(dep_origen) === String(dep_destino)) {
+      return res.status(400).json({ error: 'El departamento de origen y destino no pueden ser el mismo' });
+    }
+
+    // Validar que el destino exista.
+    const { rows: dep } = await db.query('SELECT dep_id FROM departamentos WHERE dep_id = ?', [dep_destino]);
+    if (!dep.length) return res.status(400).json({ error: 'El departamento destino no existe' });
+
+    connection = await db.pool.getConnection();
+    await connection.beginTransaction();
+
+    const ph = plus.map(() => '?').join(',');
+
+    // PLUs que YA existen en el destino → se omiten para no chocar con la PK.
+    const [yaEnDestino] = await connection.query(
+      `SELECT pro_codigo_plu FROM productos WHERE dep_id = ? AND pro_codigo_plu IN (${ph})`,
+      [dep_destino, ...plus]
+    );
+    const omitidos = yaEnDestino.map((r) => r.pro_codigo_plu);
+    const omitidosSet = new Set(omitidos);
+    const aMover = plus.filter((p) => !omitidosSet.has(p));
+
+    let movidos = 0;
+    if (aMover.length) {
+      const phMover = aMover.map(() => '?').join(',');
+      const [r] = await connection.query(
+        `UPDATE productos SET dep_id = ? WHERE dep_id = ? AND pro_codigo_plu IN (${phMover})`,
+        [dep_destino, dep_origen, ...aMover]
+      );
+      movidos = r.affectedRows;
+    }
+
+    await connection.commit();
+    res.json({ ok: true, movidos, omitidos });
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('[moverProductosBulk]', err.message);
+    res.status(500).json({ error: 'No se pudieron mover los productos' });
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
 // GET /api/admin/master-productos/export
 async function exportarMasterExcel(req, res) {
   try {
@@ -709,5 +765,5 @@ module.exports = {
   subirCSV, actualizarDemandaDesdeVentas,
   buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
   listarClasificacion, clasificarBulk,
-  obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, activarProductosBulk, exportarMasterExcel
+  obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, activarProductosBulk, moverProductosBulk, exportarMasterExcel
 };

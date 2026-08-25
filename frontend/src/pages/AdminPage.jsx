@@ -4,6 +4,7 @@ import useAppStore from '../store/useAppStore'
 import Swal from 'sweetalert2'
 import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, actualizarDemandaVentas, getClasificacion, clasificacionBulk } from '../api'
 import MasterAdminPanel from '../components/admin/MasterAdminPanel'
+import MoverProductosTab from '../components/admin/MoverProductosTab'
 import Logo from '../components/Logo'
 
 // ── Tab Configuración ────────────────────────────────────────
@@ -839,11 +840,12 @@ export default function AdminPage() {
     { key: 'clasificacion', label: '🏷️ Clasificación' },
     { key: 'dias',          label: '📅 Días producción' },
     { key: 'master',        label: '📊 Maestro' },
+    { key: 'mover',         label: '🔀 Mover' },
     { key: 'export',        label: '📥 Exportar' },
   ]
 
-  // El Maestro tiene una tabla ancha; le damos más espacio que al resto de pestañas.
-  const anchoTab = tab === 'master' ? 'max-w-6xl' : 'max-w-2xl'
+  // El Maestro y Mover tienen tablas anchas; les damos más espacio que al resto.
+  const anchoTab = (tab === 'master' || tab === 'mover') ? 'max-w-6xl' : 'max-w-2xl'
 
   return (
     <div className={`min-h-screen bg-gray-950 mx-auto ${anchoTab}`}>
@@ -874,6 +876,7 @@ export default function AdminPage() {
         {tab === 'clasificacion' && <ClasificacionTab />}
         {tab === 'dias'          && <DiasProduccionTab />}
         {tab === 'master'        && <MasterAdminPanel />}
+        {tab === 'mover'         && <MoverProductosTab />}
         {tab === 'export'        && <ExportTab />}
       </div>
     </div>

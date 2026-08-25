@@ -133,6 +133,7 @@ router.get('/admin/master-productos',     authMaster, ctrl.obtenerMasterProducto
 router.post('/admin/master-productos/bulk', authMaster, ctrl.actualizarMasterProductosBulk);
 router.post('/admin/master-productos/delete', authMaster, ctrl.eliminarMasterProductosBulk);
 router.post('/admin/master-productos/activar', authMaster, ctrl.activarProductosBulk);
+router.post('/admin/master-productos/mover', authMaster, ctrl.moverProductosBulk);
 router.get('/admin/master-productos/export', authMaster, ctrl.exportarMasterExcel);
 
 module.exports = router;
