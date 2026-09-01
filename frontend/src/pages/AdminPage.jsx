@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore from '../store/useAppStore'
 import Swal from 'sweetalert2'
-import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, actualizarDemandaVentas, getClasificacion, clasificacionBulk } from '../api'
+import { getDepartamentos, crearDepartamento, updateDepartamento, getConfig, updateConfig, subirCSV, actualizarDemandaVentas, actualizarDemandaVentasProducto, getProductosLista, getClasificacion, clasificacionBulk } from '../api'
 import MasterAdminPanel from '../components/admin/MasterAdminPanel'
 import MoverProductosTab from '../components/admin/MoverProductosTab'
 import Logo from '../components/Logo'
@@ -161,7 +161,36 @@ function CsvTab() {
   const [loadingVentas, setLoadingV]  = useState(false)
   const [resVentas, setResVentas]     = useState(null)
 
+  // Actualizar venta de UN solo producto
+  const [depProd, setDepProd]         = useState('')
+  const [prodsDep, setProdsDep]       = useState([])
+  const [pluProd, setPluProd]         = useState('')
+  const [diasProd, setDiasProd]       = useState(30)
+  const [loadingProd, setLoadingProd] = useState(false)
+  const [resProd, setResProd]         = useState(null)
+
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
+
+  // Al elegir depto, cargar sus productos para el selector (todos, incl. inactivos)
+  useEffect(() => {
+    setPluProd(''); setResProd(null)
+    if (!depProd) { setProdsDep([]); return }
+    getProductosLista(depProd).then(d => setProdsDep(Array.isArray(d) ? d : [])).catch(() => setProdsDep([]))
+  }, [depProd])
+
+  const actualizarVentaProducto = async () => {
+    if (!depProd || !pluProd) return
+    setLoadingProd(true); setResProd(null)
+    try {
+      const data = await actualizarDemandaVentasProducto(pluProd, depProd, Number(diasProd))
+      setResProd(data)
+      Swal.fire({ icon: 'success', title: 'Venta actualizada',
+        html: `<b>${data.nombre}</b><br/>${data.vta_total_periodo} unidades en ${data.dias} días`,
+        timer: 3200, showConfirmButton: false, background: '#1b2520', color: '#fff' })
+    } catch (e) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo actualizar', 'error')
+    } finally { setLoadingProd(false) }
+  }
 
   const actualizarDesdeVentas = async () => {
     const scope = depVentas
@@ -239,6 +268,47 @@ function CsvTab() {
         )}
         <button onClick={actualizarDesdeVentas} disabled={loadingVentas} className="btn-primary w-full disabled:opacity-40">
           {loadingVentas ? '⏳ Actualizando…' : '⚡ Actualizar demanda ahora'}
+        </button>
+      </div>
+
+      {/* Actualizar venta de UN solo producto */}
+      <div className="card p-4 space-y-3 border border-sky-500/40">
+        <div>
+          <p className="text-white font-bold text-sm">🎯 Actualizar venta de un solo producto</p>
+          <p className="text-gray-400 text-xs">Recalcula la venta de un producto puntual con su propia cantidad de días. Útil para ajustar uno sin tocar el resto del departamento.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="label">Departamento</label>
+            <select value={depProd} onChange={e => setDepProd(e.target.value)} className="input-field">
+              <option value="">— Elegir —</option>
+              {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label">Producto</label>
+            <select value={pluProd} onChange={e => setPluProd(e.target.value)} className="input-field" disabled={!depProd}>
+              <option value="">{depProd ? `— Elegir (${prodsDep.length}) —` : '— Elige un depto primero —'}</option>
+              {prodsDep.map(p => (
+                <option key={p.pro_codigo_plu} value={p.pro_codigo_plu}>
+                  {p.pro_nombre_producto} (PLU {p.pro_codigo_plu})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="label">Días de venta</label>
+          <input type="number" min={1} max={365} value={diasProd} onChange={e => setDiasProd(e.target.value)} className="input-field" />
+        </div>
+        {resProd && (
+          <div className="bg-gray-900 rounded-xl p-3 text-center">
+            <p className="text-sky-400 font-bold text-lg">{resProd.vta_total_periodo} <span className="text-gray-500 text-xs font-normal">unidades / {resProd.dias} días</span></p>
+            <p className="text-gray-400 text-xs">{resProd.nombre}</p>
+          </div>
+        )}
+        <button onClick={actualizarVentaProducto} disabled={loadingProd || !depProd || !pluProd} className="btn-primary w-full disabled:opacity-40 bg-sky-600 hover:bg-sky-500">
+          {loadingProd ? '⏳ Actualizando…' : '🎯 Actualizar este producto'}
         </button>
       </div>
 

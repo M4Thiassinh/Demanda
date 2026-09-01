@@ -758,11 +758,84 @@ async function actualizarDemandaDesdeVentas(req, res) {
   }
 }
 
+// POST /api/admin/actualizar-demanda-ventas-producto  { plu, dep_id, dias? }
+// Igual que la masiva, pero recalcula la venta de UN solo producto con su propia
+// ventana de días. Respeta la separación de Teja Food por caja (unidad_negocio).
+// Producto sin ventas en el período → queda en 0.
+async function actualizarDemandaVentasProducto(req, res) {
+  try {
+    const plu = String(req.body?.plu || '').trim();
+    const depId = String(req.body?.dep_id || '').trim();
+    let dias = parseInt(req.body?.dias, 10);
+    if (!plu || !depId) return res.status(400).json({ error: 'plu y dep_id requeridos' });
+    if (!Number.isFinite(dias) || dias < 1 || dias > 365) dias = 30;
+
+    // Verificar que el producto exista en ese departamento.
+    const { rows: prod } = await db.query(
+      'SELECT pro_nombre_producto FROM productos WHERE pro_codigo_plu = ? AND dep_id = ?',
+      [plu, depId]
+    );
+    if (!prod.length) return res.status(404).json({ error: 'El producto no existe en ese departamento' });
+
+    if (TEJAFOOD_DEPS.includes(depId)) {
+      // Teja Food: separa por la caja de venta según el depto.
+      await db.query(
+        `UPDATE productos p
+           LEFT JOIN (
+             SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+                AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
+                AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+              GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
+           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
+              AND v.unidad_negocio = CASE p.dep_id WHEN '1347' THEN 'TEJA FOOD TIENDA' WHEN '2347' THEN 'TEJA FOOD SALA' END
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+          WHERE p.dep_id = ? AND p.pro_codigo_plu = ?`,
+        [dias, plu, dias, depId, plu]
+      );
+    } else {
+      // Departamento normal: suma todas las ventas del PLU.
+      await db.query(
+        `UPDATE productos p
+           LEFT JOIN (
+             SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
+               FROM db_analitica_supermercado.fact_ventas fv
+              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+                AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+              GROUP BY fv.pro_codigo_plu
+           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+          WHERE p.dep_id = ? AND p.pro_codigo_plu = ?`,
+        [dias, plu, dias, depId, plu]
+      );
+    }
+
+    // Leer el resultado para devolverlo.
+    const { rows: after } = await db.query(
+      'SELECT vta_total_periodo, dias_historial FROM productos WHERE pro_codigo_plu = ? AND dep_id = ?',
+      [plu, depId]
+    );
+    res.json({
+      ok: true,
+      plu, dep_id: depId,
+      nombre: prod[0].pro_nombre_producto,
+      vta_total_periodo: Number(after[0]?.vta_total_periodo ?? 0),
+      dias,
+    });
+  } catch (err) {
+    console.error('[actualizarDemandaVentasProducto]', err.message);
+    res.status(500).json({ error: 'No se pudo actualizar la venta del producto: ' + err.message });
+  }
+}
+
 module.exports = {
   listarDepartamentos, crearDepartamento, actualizarDepartamento,
   listarUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario,
   obtenerConfig, actualizarConfig,
-  subirCSV, actualizarDemandaDesdeVentas,
+  subirCSV, actualizarDemandaDesdeVentas, actualizarDemandaVentasProducto,
   buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
   listarClasificacion, clasificarBulk,
   obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, activarProductosBulk, moverProductosBulk, exportarMasterExcel
