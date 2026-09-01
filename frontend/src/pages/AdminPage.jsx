@@ -165,18 +165,29 @@ function CsvTab() {
   const [depProd, setDepProd]         = useState('')
   const [prodsDep, setProdsDep]       = useState([])
   const [pluProd, setPluProd]         = useState('')
+  const [buscarProd, setBuscarProd]   = useState('')
   const [diasProd, setDiasProd]       = useState(30)
   const [loadingProd, setLoadingProd] = useState(false)
   const [resProd, setResProd]         = useState(null)
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
 
-  // Al elegir depto, cargar sus productos para el selector (todos, incl. inactivos)
+  // Al elegir depto, cargar sus productos para el buscador (todos, incl. inactivos)
   useEffect(() => {
-    setPluProd(''); setResProd(null)
+    setPluProd(''); setBuscarProd(''); setResProd(null)
     if (!depProd) { setProdsDep([]); return }
     getProductosLista(depProd).then(d => setProdsDep(Array.isArray(d) ? d : [])).catch(() => setProdsDep([]))
   }, [depProd])
+
+  const prodElegido = prodsDep.find(p => String(p.pro_codigo_plu) === String(pluProd))
+  const prodFiltrados = (() => {
+    const q = buscarProd.trim().toLowerCase()
+    if (!q) return []
+    return prodsDep.filter(p =>
+      String(p.pro_codigo_plu).toLowerCase().includes(q) ||
+      (p.pro_nombre_producto || '').toLowerCase().includes(q)
+    )
+  })()
 
   const actualizarVentaProducto = async () => {
     if (!depProd || !pluProd) return
@@ -286,15 +297,38 @@ function CsvTab() {
             </select>
           </div>
           <div className="sm:col-span-2">
-            <label className="label">Producto</label>
-            <select value={pluProd} onChange={e => setPluProd(e.target.value)} className="input-field" disabled={!depProd}>
-              <option value="">{depProd ? `— Elegir (${prodsDep.length}) —` : '— Elige un depto primero —'}</option>
-              {prodsDep.map(p => (
-                <option key={p.pro_codigo_plu} value={p.pro_codigo_plu}>
-                  {p.pro_nombre_producto} (PLU {p.pro_codigo_plu})
-                </option>
-              ))}
-            </select>
+            <label className="label">Producto {depProd && <span className="text-gray-500 font-normal">· {prodsDep.length} en el depto</span>}</label>
+            {prodElegido ? (
+              <div className="flex items-center gap-2">
+                <div className="input-field flex-1 flex items-center min-w-0">
+                  <span className="truncate"><span className="font-mono text-gray-400">{prodElegido.pro_codigo_plu}</span> · {prodElegido.pro_nombre_producto}</span>
+                </div>
+                <button type="button" onClick={() => { setPluProd(''); setBuscarProd('') }}
+                  className="btn-secondary px-3 py-2 text-sm whitespace-nowrap">Cambiar</button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input type="text" value={buscarProd} onChange={e => setBuscarProd(e.target.value)}
+                  placeholder={depProd ? '🔍 Buscar por PLU o nombre…' : 'Elige un depto primero'}
+                  disabled={!depProd} className="input-field" />
+                {buscarProd.trim() && (
+                  <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-xl">
+                    {prodFiltrados.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">Sin resultados para “{buscarProd}”.</div>
+                    ) : prodFiltrados.slice(0, 30).map(p => (
+                      <button type="button" key={p.pro_codigo_plu}
+                        onClick={() => { setPluProd(p.pro_codigo_plu); setBuscarProd('') }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-800 text-sm text-gray-200 border-b border-gray-800 last:border-0">
+                        <span className="font-mono text-brand-400">{p.pro_codigo_plu}</span> · {p.pro_nombre_producto}
+                      </button>
+                    ))}
+                    {prodFiltrados.length > 30 && (
+                      <div className="px-3 py-1.5 text-xs text-gray-500 bg-gray-950">Mostrando 30 de {prodFiltrados.length}. Afina la búsqueda…</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div>
