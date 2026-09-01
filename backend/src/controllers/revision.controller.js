@@ -3,10 +3,12 @@ const ConfigService             = require('../services/ConfigService');
 const { calcularDemanda, diaSemanaSantiago } = require('../services/DemandCalculatorService');
 const { enviarOrdenProduccion, enviarPedidoUnidoTejaFood } = require('../services/EmailService');
 
-// Departamentos Teja Food: cuando AMBOS deptos tienen al menos un pedido del día,
-// se envía un correo unido (Tienda + Local) con la SUMA de TODOS los pedidos del
-// día por PLU. Se re-envía en cada finalización con el total acumulado (el KDS
-// hace upsert por fecha, así que siempre queda el total más completo del día).
+// Departamentos Teja Food: el pedido unido (Sala + Local + Marley) suma TODOS los
+// pedidos del día por PLU. El KDS se actualiza AL INSTANTE en cada finalización
+// con lo que haya (no espera a que estén todos los deptos), haciendo upsert por
+// fecha, así que siempre queda el total más completo del día. El correo diario
+// también se manda con lo que exista a la hora de corte (no se pierde ningún
+// pedido aunque falte algún depto ese día).
 const TEJAFOOD_LOCAL  = '1347';   // Local Teja Food  (columna "Tienda")
 const TEJAFOOD_TIENDA = '2347';   // Sala Teja Food   (columna "Sala")
 const TEJAFOOD_MARLEY = 'MARLEY'; // Marley Coffee    (columna "Marley") — opcional
@@ -17,9 +19,11 @@ const TEJAFOOD_MARLEY = 'MARLEY'; // Marley Coffee    (columna "Marley") — opc
  * No lanza: cualquier fallo se registra en log para no afectar el pedido principal.
  */
 // Construye el pedido combinado del DÍA: suma de TODOS los pedidos completados
-// hoy por depto Teja Food, combinado por PLU. Devuelve null si algún depto no
-// tiene pedidos hoy (se requiere que AMBOS tengan al menos uno).
-async function construirPedidoDiaTejaFood() {
+// hoy por depto Teja Food, combinado por PLU.
+//   requiereAmbos=true  → devuelve null salvo que Local Y Sala tengan pedidos.
+//   requiereAmbos=false → devuelve lo que haya mientras AL MENOS un depto tenga
+//                         pedidos hoy (para el KDS instantáneo y el correo).
+async function construirPedidoDiaTejaFood({ requiereAmbos = true } = {}) {
   const { rows: resumen } = await db.query(
     `SELECT dep_id, COUNT(*) AS n
        FROM revisiones
@@ -32,8 +36,13 @@ async function construirPedidoDiaTejaFood() {
   const nLocal  = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_LOCAL)?.n || 0);
   const nTienda = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_TIENDA)?.n || 0);
   const nMarley = Number(resumen.find((r) => String(r.dep_id) === TEJAFOOD_MARLEY)?.n || 0);
-  // Se requiere el par principal (Local + Sala). Marley es opcional: se suma si tiene pedidos.
-  if (!nLocal || !nTienda) return null;
+  if (requiereAmbos) {
+    // Modo estricto: se exige el par Local + Sala (Marley opcional).
+    if (!nLocal || !nTienda) return null;
+  } else if (!nLocal && !nTienda && !nMarley) {
+    // Modo instantáneo: basta con que exista algún pedido Teja Food hoy.
+    return null;
+  }
 
   const itemsDelDia = async (depId) => {
     const { rows: det } = await db.query(
@@ -65,7 +74,8 @@ async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
   const depId = String(depIdFinalizado);
   if (depId !== TEJAFOOD_LOCAL && depId !== TEJAFOOD_TIENDA && depId !== TEJAFOOD_MARLEY) return;
   try {
-    const pedido = await construirPedidoDiaTejaFood();
+    // KDS instantáneo: manda con lo que haya, sin esperar a que estén todos.
+    const pedido = await construirPedidoDiaTejaFood({ requiereAmbos: false });
     if (!pedido) return;
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
@@ -86,9 +96,9 @@ async function intentarPedidoUnidoTejaFood(depIdFinalizado) {
 // el día como enviado. El KDS ya se fue actualizando en tiempo real aparte.
 async function enviarCorreoDiarioTejaFood() {
   try {
-    const pedido = await construirPedidoDiaTejaFood();
-    // Pedido incompleto: aún no están todos los deptos → NO es error, solo
-    // todavía no toca. El scheduler reintentará en el próximo minuto.
+    // Manda con lo que haya (no se pierde ningún pedido aunque falte un depto).
+    // Solo se omite si NO hay ningún pedido Teja Food hoy.
+    const pedido = await construirPedidoDiaTejaFood({ requiereAmbos: false });
     if (!pedido) return { enviado: false, motivo: 'incompleto' };
     const r = await enviarPedidoUnidoTejaFood({
       fecha: new Date(),
