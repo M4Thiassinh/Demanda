@@ -62,7 +62,13 @@ async function actualizarDepartamento(req, res) {
 // GET /api/usuarios
 async function listarUsuarios(req, res) {
   try {
-    const { rows } = await db.query('SELECT usu_id, usu_nombre FROM usuarios ORDER BY usu_nombre');
+    // Filtro opcional por área ('sala' | 'bodega'); sin filtro devuelve todos.
+    const area = (req.query.area === 'sala' || req.query.area === 'bodega') ? req.query.area : null;
+    const { rows } = await db.query(
+      `SELECT usu_id, usu_nombre, usu_area FROM usuarios
+        WHERE (? IS NULL OR usu_area = ?) ORDER BY usu_nombre`,
+      [area, area]
+    );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -613,7 +619,8 @@ async function crearUsuario(req, res) {
   try {
     const { usu_nombre } = req.body;
     if (!usu_nombre) return res.status(400).json({ error: 'Nombre requerido' });
-    await db.query(`INSERT INTO usuarios (usu_nombre) VALUES (?)`, [usu_nombre]);
+    const area = (req.body.usu_area === 'bodega') ? 'bodega' : 'sala';
+    await db.query(`INSERT INTO usuarios (usu_nombre, usu_area) VALUES (?, ?)`, [usu_nombre, area]);
     res.status(201).json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
@@ -623,7 +630,11 @@ async function actualizarUsuario(req, res) {
   try {
     const { usu_nombre } = req.body;
     if (!usu_nombre) return res.status(400).json({ error: 'Nombre requerido' });
-    await db.query(`UPDATE usuarios SET usu_nombre = ? WHERE usu_id = ?`, [usu_nombre, req.params.id]);
+    const area = (req.body.usu_area === 'bodega' || req.body.usu_area === 'sala') ? req.body.usu_area : null;
+    await db.query(
+      `UPDATE usuarios SET usu_nombre = ?, usu_area = COALESCE(?, usu_area) WHERE usu_id = ?`,
+      [usu_nombre, area, req.params.id]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }

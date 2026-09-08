@@ -67,6 +67,11 @@ export default function RolePage() {
     : esTomaStock
       ? depsList.filter((d) => !d.dep_productiva)
       : depsList.filter((d) => d.dep_productiva)
+  // Usuarios separados por área: en Bodega solo los de bodega; en sala, el resto.
+  const usuariosList = Array.isArray(usuarios) ? usuarios : []
+  const usuariosVisibles = esBodega
+    ? usuariosList.filter((u) => u.usu_area === 'bodega')
+    : usuariosList.filter((u) => u.usu_area !== 'bodega')
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -147,7 +152,7 @@ export default function RolePage() {
               <select id="sel-usuario" value={usuSel} onChange={e => { setUsuSel(e.target.value); setError('') }}
                 className="input-field text-base py-3.5">
                 <option value="">— Seleccionar —</option>
-                {usuarios.map(u => <option key={u.usu_id} value={u.usu_id}>{u.usu_nombre}</option>)}
+                {usuariosVisibles.map(u => <option key={u.usu_id} value={u.usu_id}>{u.usu_nombre}</option>)}
               </select>
             </div>
 

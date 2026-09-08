@@ -400,6 +400,7 @@ function CsvTab() {
 function UsuariosTab() {
   const [usuarios, setUsuarios] = useState([])
   const [nombre, setNombre] = useState('')
+  const [area, setArea] = useState('sala')
   const [editId, setEditId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -421,11 +422,12 @@ function UsuariosTab() {
     try {
       const { crearUsuario, actualizarUsuario } = await import('../api')
       if (editId) {
-        await actualizarUsuario(editId, { usu_nombre: nombre })
+        await actualizarUsuario(editId, { usu_nombre: nombre, usu_area: area })
       } else {
-        await crearUsuario({ usu_nombre: nombre })
+        await crearUsuario({ usu_nombre: nombre, usu_area: area })
       }
       setNombre('')
+      setArea('sala')
       setEditId(null)
       await cargar()
     } catch (e) { setError('Error al guardar') }
@@ -465,13 +467,21 @@ function UsuariosTab() {
           <input type="text" value={nombre} onChange={e => setNombre(e.target.value)}
             className="input-field" placeholder="Ej: Juan Pérez" autoFocus />
         </div>
+        <div>
+          <label className="label">Área</label>
+          <select value={area} onChange={e => setArea(e.target.value)} className="input-field">
+            <option value="sala">Sala (revisión / toma de stock)</option>
+            <option value="bodega">Bodega (toma de inventario)</option>
+          </select>
+          <p className="text-gray-500 text-xs mt-1">Define en qué perfil aparece este usuario. No se mezclan las listas.</p>
+        </div>
         {error && <p className="text-rose-400 text-sm text-center">{error}</p>}
         <div className="flex gap-3">
           <button type="submit" disabled={loading || !nombre.trim()} className="btn-primary flex-1">
             {loading ? 'Guardando...' : (editId ? 'Actualizar' : 'Crear Usuario')}
           </button>
           {editId && (
-            <button type="button" onClick={() => { setEditId(null); setNombre('') }} className="btn-secondary px-4">
+            <button type="button" onClick={() => { setEditId(null); setNombre(''); setArea('sala') }} className="btn-secondary px-4">
               Cancelar
             </button>
           )}
@@ -485,9 +495,14 @@ function UsuariosTab() {
         <div className="divide-y divide-gray-700/40">
           {usuarios.map(u => (
             <div key={u.usu_id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-700/20">
-              <span className="text-white font-medium text-sm">{u.usu_nombre}</span>
+              <span className="text-white font-medium text-sm flex items-center gap-2">
+                {u.usu_nombre}
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${u.usu_area === 'bodega' ? 'bg-sky-900/40 border border-sky-700/50 text-sky-300' : 'bg-gray-700/50 border border-gray-600/50 text-gray-300'}`}>
+                  {u.usu_area === 'bodega' ? '🏬 Bodega' : '🏪 Sala'}
+                </span>
+              </span>
               <div className="flex gap-2">
-                <button onClick={() => { setEditId(u.usu_id); setNombre(u.usu_nombre) }}
+                <button onClick={() => { setEditId(u.usu_id); setNombre(u.usu_nombre); setArea(u.usu_area || 'sala') }}
                   className="text-brand-400 hover:text-brand-300 text-xs px-2 py-1 bg-brand-900/30 rounded-lg">
                   Editar
                 </button>

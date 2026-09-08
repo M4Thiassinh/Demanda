@@ -52,7 +52,7 @@ export const getDepartamentos = (opts) => {
 }
 export const crearDepartamento = (data) => api.post('/departamentos', data).then(r => r.data)
 export const updateDepartamento = (depId, data) => api.put(`/departamentos/${depId}`, data).then(r => r.data)
-export const getUsuarios = () => api.get('/usuarios').then(r => r.data)
+export const getUsuarios = (area) => api.get('/usuarios', { params: area ? { area } : {} }).then(r => r.data)
 export const crearUsuario = (data) => api.post('/admin/usuarios', data).then(r => r.data)
 export const actualizarUsuario = (id, data) => api.put(`/admin/usuarios/${id}`, data).then(r => r.data)
 export const eliminarUsuario = (id) => api.delete(`/admin/usuarios/${id}`).then(r => r.data)
