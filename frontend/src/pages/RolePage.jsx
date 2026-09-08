@@ -61,12 +61,10 @@ export default function RolePage() {
   const tituloPerfil = esBodega ? 'Toma de Bodega' : esTomaStock ? 'Toma de Stock' : 'Solicitud Producción Administración'
   const iconoPerfil  = esBodega ? '🏬' : esTomaStock ? '📦' : '📋'
   const depsList = Array.isArray(departamentos) ? departamentos : []
-  // Bodega: cualquier departamento. Toma de Stock: no productivos. Operador: productivos.
-  const depsVisibles = esBodega
-    ? depsList
-    : esTomaStock
-      ? depsList.filter((d) => !d.dep_productiva)
-      : depsList.filter((d) => d.dep_productiva)
+  // Bodega y Toma de Stock: áreas NO productivas. Operador (Administración): productivas.
+  const depsVisibles = (esBodega || esTomaStock)
+    ? depsList.filter((d) => !d.dep_productiva)
+    : depsList.filter((d) => d.dep_productiva)
   // Usuarios separados por área: en Bodega solo los de bodega; en sala, el resto.
   const usuariosList = Array.isArray(usuarios) ? usuarios : []
   const usuariosVisibles = esBodega
