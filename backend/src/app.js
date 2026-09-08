@@ -5,6 +5,7 @@ const path       = require('path');
 const adminRoutes     = require('./routes/admin.routes');
 const operatorRoutes  = require('./routes/operator.routes');
 const infaltablesRoutes = require('./routes/infaltables.routes');
+const bodegaRoutes    = require('./routes/bodega.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -27,6 +28,7 @@ app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use('/api', adminRoutes);
 app.use('/api/revision', operatorRoutes);
 app.use('/api/infaltables', infaltablesRoutes);
+app.use('/api/bodega', bodegaRoutes);
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
 
 // ── Frontend estático (producción) ───────────────────────────

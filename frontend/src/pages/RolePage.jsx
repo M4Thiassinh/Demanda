@@ -33,6 +33,9 @@ export default function RolePage() {
       setDepartamento(dep)
       setUsuario(usu)
 
+      // Toma de Bodega: flujo aparte (la propia página crea/recupera la toma).
+      if (role === 'bodega') { navigate('/bodega'); return }
+
       // Intentar recuperar revisión activa
       const activa = await buscarRevisionActiva(dep.dep_id, usu.usu_id)
       if (activa) {
@@ -53,13 +56,17 @@ export default function RolePage() {
   // Administración (operador) → áreas productivas. Toma de Stock → áreas no productivas.
   // Ambos comparten el formulario (usuario + depto) y el flujo de revisión.
   const esTomaStock      = role === 'toma_stock'
-  const esPerfilRevision = role === 'operador' || esTomaStock
-  const tituloPerfil = esTomaStock ? 'Toma de Stock' : 'Solicitud Producción Administración'
-  const iconoPerfil  = esTomaStock ? '📦' : '📋'
+  const esBodega         = role === 'bodega'
+  const esPerfilRevision = role === 'operador' || esTomaStock || esBodega
+  const tituloPerfil = esBodega ? 'Toma de Bodega' : esTomaStock ? 'Toma de Stock' : 'Solicitud Producción Administración'
+  const iconoPerfil  = esBodega ? '🏬' : esTomaStock ? '📦' : '📋'
   const depsList = Array.isArray(departamentos) ? departamentos : []
-  const depsVisibles = esTomaStock
-    ? depsList.filter((d) => !d.dep_productiva)
-    : depsList.filter((d) => d.dep_productiva)
+  // Bodega: cualquier departamento. Toma de Stock: no productivos. Operador: productivos.
+  const depsVisibles = esBodega
+    ? depsList
+    : esTomaStock
+      ? depsList.filter((d) => !d.dep_productiva)
+      : depsList.filter((d) => d.dep_productiva)
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -90,6 +97,13 @@ export default function RolePage() {
             <div><p className="text-white font-bold text-lg">Toma de Stock</p>
               <p className="text-gray-400 text-sm">Reposición · áreas no productivas</p></div>
             <span className="ml-auto text-gray-500 group-hover:text-emerald-400">→</span>
+          </button>
+          <button id="btn-bodega" onClick={() => { setRole('bodega'); setCategoria(null) }}
+            className="w-full card p-5 text-left hover:border-sky-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
+            <div className="w-14 h-14 bg-sky-600/20 rounded-2xl flex items-center justify-center text-3xl">🏬</div>
+            <div><p className="text-white font-bold text-lg">Toma de Bodega</p>
+              <p className="text-gray-400 text-sm">Contar stock físico de bodega vs. sistema</p></div>
+            <span className="ml-auto text-gray-500 group-hover:text-sky-400">→</span>
           </button>
           <button id="btn-produccion" onClick={() => { setRole('produccion'); setCategoria('especial'); navigate('/areas-productivas') }}
             className="w-full card p-5 text-left hover:border-amber-500/60 hover:bg-gray-700/60 active:scale-[0.98] transition-all group flex items-center gap-4">
@@ -150,7 +164,7 @@ export default function RolePage() {
 
             <button id="btn-continuar" onClick={continuar} disabled={cargando || !depSel || !usuSel}
               className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
-              {cargando ? 'Iniciando…' : 'Comenzar Revisión →'}
+              {cargando ? 'Iniciando…' : esBodega ? 'Comenzar Toma de Bodega →' : 'Comenzar Revisión →'}
             </button>
           </div>
         </div>

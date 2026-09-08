@@ -89,6 +89,16 @@ export const obtenerRevision = (revId) => api.get(`/revision/${revId}`).then(r =
 export const eliminarDetalle = (revId, plu) => api.delete(`/revision/${revId}/detalle/${plu}`).then(r => r.data)
 export const finalizarRevision = (revId, items, emails_to) => api.post(`/revision/${revId}/finalizar`, { items, emails_to }).then(r => r.data)
 
+// Toma de inventario de Bodega (conteo físico, independiente de la revisión)
+export const buscarTomaBodegaActiva = (depId, usuId) => api.get('/bodega/activa', { params: { dep_id: depId, usu_id: usuId } }).then(r => r.data)
+export const iniciarTomaBodega = (depId, usuId) => api.post('/bodega', { dep_id: depId, usu_id: usuId }).then(r => r.data)
+export const buscarProductosBodega = (depId, q) => api.get('/bodega/productos', { params: { dep_id: depId, q } }).then(r => r.data)
+export const obtenerTomaBodega = (tbId) => api.get(`/bodega/${tbId}`).then(r => r.data)
+export const guardarDetalleBodega = (tbId, plu, cantidad_fisica) => api.post(`/bodega/${tbId}/detalle`, { pro_codigo_plu: plu, cantidad_fisica }).then(r => r.data)
+export const eliminarDetalleBodega = (tbId, plu) => api.delete(`/bodega/${tbId}/detalle/${plu}`).then(r => r.data)
+export const finalizarTomaBodega = (tbId) => api.post(`/bodega/${tbId}/finalizar`).then(r => r.data)
+export const exportarTomaBodegaExcel = (tbId) => api.get(`/bodega/${tbId}/export`, { responseType: 'blob' })
+
 // Clasificación de productos (Panel Admin): categoría + infaltable + jornada
 export const getClasificacion = (depId) => api.get('/admin/clasificacion', { params: { dep_id: depId } }).then(r => r.data)
 export const clasificacionBulk = (depId, cambios) => api.post('/admin/clasificacion/bulk', { dep_id: depId, cambios }).then(r => r.data)

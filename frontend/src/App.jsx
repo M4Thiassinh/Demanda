@@ -6,6 +6,7 @@ import RevisionPage from './pages/RevisionPage'
 import AdminPage   from './pages/AdminPage'
 import InfaltablesPage from './pages/InfaltablesPage'
 import AreasProductivasPage from './pages/AreasProductivasPage'
+import BodegaPage from './pages/BodegaPage'
 
 function ProtectedRoute({ children, requiredRole, requireDep }) {
   const role = useAppStore((s) => s.role)
@@ -30,6 +31,14 @@ export default function App() {
           element={
             <ProtectedRoute requiredRole={['operador', 'toma_stock']} requireDep>
               <RevisionPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/bodega"
+          element={
+            <ProtectedRoute requiredRole="bodega" requireDep>
+              <BodegaPage />
             </ProtectedRoute>
           }
         />
