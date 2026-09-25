@@ -89,13 +89,16 @@ const db = require('./config/db');
 
   const chequear = async () => {
     try {
-      const partes = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-      }).formatToParts(new Date());
-      const val = (t) => partes.find((x) => x.type === t)?.value;
-      const hoy = `${val('year')}-${val('month')}-${val('day')}`;
-      const h = parseInt(val('hour'), 10), m = parseInt(val('minute'), 10);
+      // Usamos la hora LOCAL del sistema operativo (no Intl 'America/Santiago').
+      // Motivo: el Node antiguo del servidor tiene datos de zona horaria
+      // DESACTUALIZADOS y su Intl calcula 1 hora de más (cree que Chile está en
+      // horario de verano cuando sigue en invierno), lo que disparaba el correo
+      // 1 hora antes. El reloj del SO sí es correcto (Windows recibe las reglas
+      // de horario por Windows Update) y el servidor está en Chile.
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const hoy = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const h = now.getHours(), m = now.getMinutes();
 
       // Solo desde la hora de corte en adelante.
       const enVentana = h > HORA || (h === HORA && m >= MIN);
