@@ -302,67 +302,304 @@ async function clasificarBulk(req, res) {
   }
 }
 
+// El esquema de la base analítica fue cambiando entre versiones y no todas las
+// copias están al día (fact_mermas renombró id_producto → pro_codigo_plu, igual
+// que fact_stock_diario en la migración 010; fact_ventas sumó después la columna
+// unidad_negocio_historica). Para que el export funcione contra cualquiera de las
+// dos, las diferencias se detectan una vez contra information_schema y se cachean.
+const _colsAnalitica = new Map();
+async function columnasDe(tabla) {
+  if (_colsAnalitica.has(tabla)) return _colsAnalitica.get(tabla);
+  const { rows } = await db.query(
+    `SELECT COLUMN_NAME AS c
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = 'db_analitica_supermercado' AND TABLE_NAME = ?`,
+    [tabla]
+  );
+  const set = new Set(rows.map((r) => r.c));
+  _colsAnalitica.set(tabla, set);
+  return set;
+}
+const columnaPluMermas = async () =>
+  (await columnasDe('fact_mermas')).has('pro_codigo_plu') ? 'pro_codigo_plu' : 'id_producto';
+
 // GET /api/admin/export
+// Exporta el consolidado de lo PEDIDO por departamento en el rango y lo cruza con
+// las VENTAS y MERMAS reales de la base analítica, más el mismo rango del año
+// anterior (mismas fechas, un año antes) para comparar.
+//
+// Notas de negocio:
+//  · Teja Food (1347 Local / 2347 Sala) vende los MISMOS PLU en dos cajas; las
+//    ventas se separan por unidad_negocio igual que en actualizarDemandaDesdeVentas.
+//  · fact_mermas NO tiene unidad_negocio: la merma es por PLU y no se puede
+//    separar por caja, así que en esos dos deptos se muestra la merma total del PLU.
 async function exportarExcel(req, res) {
   try {
     const { dep_id, fecha_ini, fecha_fin } = req.query;
-    const { rows } = await db.query(
-      `SELECT r.rev_folio, r.rev_fecha, d.dep_nombre,
-              COALESCE(u.usu_nombre,'Operador') AS usu_nombre,
-              dr.pro_codigo_plu, p.pro_codigo_barra, p.pro_nombre_producto,
-              COALESCE(dr.det_cantidad_pedir, 0) AS det_cantidad_pedir
+
+    // Rango obligatorio para poder cruzar con ventas/mermas. Si no viene, se usa
+    // AYER: la base analítica carga las ventas con un día de desfase, así que un
+    // export de "hoy" saldría siempre sin ventas ni mermas.
+    const ayerStr = () => {
+      const d = new Date(), p = (n) => String(n).padStart(2, '0');
+      d.setDate(d.getDate() - 1);
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    const esFecha = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fIni = esFecha(fecha_ini) ? fecha_ini : ayerStr();
+    const fFin = esFecha(fecha_fin) ? fecha_fin : fIni;
+    // id_fecha de la base analítica es un entero YYYYMMDD.
+    const aId   = (s) => Number(s.replace(/-/g, ''));
+    const unAno = (s) => `${Number(s.slice(0, 4)) - 1}${s.slice(4)}`;
+    const [iniAct, finAct] = [aId(fIni), aId(fFin)];
+    const [iniAnt, finAnt] = [aId(unAno(fIni)), aId(unAno(fFin))];
+
+    // Nombre del departamento para el archivo y la hoja Info. Se consulta aparte
+    // (y no se toma de los pedidos) para que salga bien aunque el período no tenga
+    // ninguna revisión.
+    let nombreDep = 'Todos';
+    if (dep_id) {
+      const { rows: d } = await db.query('SELECT dep_nombre FROM departamentos WHERE dep_id = ?', [dep_id]);
+      nombreDep = d[0]?.dep_nombre || String(dep_id);
+    }
+
+    // 1) Lo pedido: una fila por departamento + producto (consolidado del rango).
+    const { rows: pedidos } = await db.query(
+      `SELECT r.dep_id, d.dep_nombre, dr.pro_codigo_plu,
+              p.pro_codigo_barra, p.pro_nombre_producto,
+              SUM(COALESCE(dr.det_cantidad_pedir, 0)) AS pedido,
+              COUNT(DISTINCT r.rev_id) AS folios
          FROM revisiones r
-         JOIN departamentos d    ON d.dep_id = r.dep_id
-         LEFT JOIN usuarios u    ON u.usu_id = r.usu_id
+         JOIN departamentos d     ON d.dep_id = r.dep_id
          JOIN detalle_revision dr ON dr.rev_id = r.rev_id
          JOIN productos p         ON p.pro_codigo_plu = dr.pro_codigo_plu AND p.dep_id = r.dep_id
         WHERE r.rev_estado = 'completada'
           AND COALESCE(dr.det_cantidad_pedir, 0) > 0
           AND (? IS NULL OR r.dep_id = ?)
-          AND (? IS NULL OR DATE(r.rev_fecha) >= ?)
-          AND (? IS NULL OR DATE(r.rev_fecha) <= ?)
-        ORDER BY r.rev_fecha DESC, dr.det_id`,
-      [dep_id || null, dep_id || null,
-       fecha_ini || null, fecha_ini || null,
-       fecha_fin || null, fecha_fin || null]
+          AND DATE(r.rev_fecha) >= ? AND DATE(r.rev_fecha) <= ?
+        GROUP BY r.dep_id, d.dep_nombre, dr.pro_codigo_plu, p.pro_codigo_barra, p.pro_nombre_producto
+        ORDER BY d.dep_nombre, p.pro_nombre_producto`,
+      [dep_id || null, dep_id || null, fIni, fFin]
     );
+
+    // 2) Ventas y mermas de ambos períodos (agregadas por PLU en la base analítica).
+    const ventasDe = async (desde, hasta) => {
+      const { rows } = await db.query(
+        `SELECT fv.pro_codigo_plu AS plu, fv.unidad_negocio AS un,
+                SUM(fv.cantidad_unidades) AS unid, SUM(fv.venta_neta) AS monto
+           FROM db_analitica_supermercado.fact_ventas fv
+          WHERE fv.id_fecha >= ? AND fv.id_fecha <= ?
+          GROUP BY fv.pro_codigo_plu, fv.unidad_negocio`,
+        [desde, hasta]
+      );
+      // Mapa plu -> { unid, monto, porUnidad: { 'TEJA FOOD SALA': { unid, monto } } }
+      const m = new Map();
+      for (const r of rows) {
+        const k = String(r.plu);
+        if (!m.has(k)) m.set(k, { unid: 0, monto: 0, porUnidad: {} });
+        const e = m.get(k);
+        const unid = Number(r.unid) || 0, monto = Number(r.monto) || 0;
+        e.unid += unid; e.monto += monto;
+        const un = r.un || '';
+        if (!e.porUnidad[un]) e.porUnidad[un] = { unid: 0, monto: 0 };
+        e.porUnidad[un].unid += unid; e.porUnidad[un].monto += monto;
+      }
+      return m;
+    };
+    const colPlu = await columnaPluMermas(); // nombre validado contra una lista fija
+    const mermasDe = async (desde, hasta) => {
+      const { rows } = await db.query(
+        `SELECT ${colPlu} AS plu,
+                SUM(unidades_mermadas) AS unid, SUM(costo_total_merma) AS costo
+           FROM db_analitica_supermercado.fact_mermas
+          WHERE id_fecha >= ? AND id_fecha <= ?
+          GROUP BY ${colPlu}`,
+        [desde, hasta]
+      );
+      return new Map(rows.map((r) => [String(r.plu), { unid: Number(r.unid) || 0, monto: Number(r.costo) || 0 }]));
+    };
+
+    const [vAct, vAnt, mAct, mAnt] = await Promise.all([
+      ventasDe(iniAct, finAct), ventasDe(iniAnt, finAnt),
+      mermasDe(iniAct, finAct), mermasDe(iniAnt, finAnt),
+    ]);
+
+    // Teja Food: la venta del depto es solo la de SU caja.
+    const ventaDe = (mapa, plu, depId) => {
+      const e = mapa.get(String(plu));
+      if (!e) return { unid: 0, monto: 0 };
+      const un = TEJAFOOD_UNIDAD[depId];
+      return un ? (e.porUnidad[un] || { unid: 0, monto: 0 }) : { unid: e.unid, monto: e.monto };
+    };
+    // Venta consolidada de Teja Food: suma de TODAS sus cajas ('TEJA FOOD SALA' y
+    // 'TEJA FOOD TIENDA'). Antes del 26-11-2025 existía una sola, así que para el
+    // período del año anterior esto devuelve justamente el total sin separar.
+    // No se usa unidad_negocio_historica porque varios PLU de Teja Food la tienen
+    // como 'FABRICACION PROPIA' y quedarían fuera del consolidado.
+    // Ojo: 'TIENDA TEJA FOOD' es otra unidad de negocio distinta y no entra acá.
+    const ventaConsolidadaTF = (mapa, plu) =>
+      Object.entries(mapa.get(String(plu))?.porUnidad || {})
+        .filter(([un]) => un.startsWith('TEJA FOOD'))
+        .reduce((a, [, v]) => ({ unid: a.unid + v.unid, monto: a.monto + v.monto }), { unid: 0, monto: 0 });
+    const mermaDe = (mapa, plu) => mapa.get(String(plu)) || { unid: 0, monto: 0 };
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const esTejaFood = (depId) => TEJAFOOD_DEPS.includes(String(depId));
 
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Consolidado');
 
     ws.columns = [
-      { header: 'Folio',           key: 'rev_folio',           width: 22 },
-      { header: 'Fecha',           key: 'rev_fecha',           width: 20 },
-      { header: 'Usuario',         key: 'usu_nombre',          width: 16 },
-      { header: 'Departamento',    key: 'dep_nombre',          width: 16 },
-      { header: 'PLU',             key: 'pro_codigo_plu',      width: 12 },
-      { header: 'Código Barra',    key: 'pro_codigo_barra',    width: 16 },
-      { header: 'Producto',        key: 'pro_nombre_producto', width: 40 },
-      { header: 'Cantidad Pedida', key: 'det_cantidad_pedir',  width: 16 },
+      { header: 'Departamento',      key: 'dep_nombre',   width: 18 },
+      { header: 'PLU',               key: 'plu',          width: 12 },
+      { header: 'Código Barra',      key: 'barra',        width: 16 },
+      { header: 'Producto',          key: 'producto',     width: 40 },
+      { header: 'Pedido (unid)',     key: 'pedido',       width: 14 },
+      { header: 'Folios',            key: 'folios',       width: 9  },
+      { header: 'Venta (unid)',      key: 'vta_unid',     width: 13 },
+      { header: 'Venta ($)',         key: 'vta_monto',    width: 14 },
+      { header: 'Merma (unid)',      key: 'mer_unid',     width: 13 },
+      { header: 'Merma ($)',         key: 'mer_monto',    width: 14 },
+      { header: 'Pedido − Venta',    key: 'dif',          width: 14 },
+      { header: 'Venta unid (AA)',   key: 'vta_unid_aa',  width: 15 },
+      { header: 'Venta $ (AA)',      key: 'vta_monto_aa', width: 15 },
+      { header: 'Merma unid (AA)',   key: 'mer_unid_aa',  width: 15 },
+      { header: 'Merma $ (AA)',      key: 'mer_monto_aa', width: 15 },
+      { header: 'Var. venta unid %', key: 'var_pct',      width: 17 },
     ];
 
     ws.getRow(1).eachCell((cell) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.autoFilter = { from: 'A1', to: 'P1' };
+
+    const tot = { pedido: 0, vta_unid: 0, vta_monto: 0, mer_unid: 0, mer_monto: 0,
+                  vta_unid_aa: 0, vta_monto_aa: 0, mer_unid_aa: 0, mer_monto_aa: 0 };
+    // PLU de Teja Food pedidos en el período: su venta del año anterior no existe
+    // separada por caja, así que va aparte (consolidada) al final de la planilla.
+    const plusTejaFood = new Set();
+
+    pedidos.forEach((l) => {
+      const va = ventaDe(vAct, l.pro_codigo_plu, l.dep_id);
+      const ma = mermaDe(mAct, l.pro_codigo_plu);
+      const mb = mermaDe(mAnt, l.pro_codigo_plu);
+      const pedido = Number(l.pedido) || 0;
+
+      // Teja Food: la separación por caja (TEJA FOOD SALA / TEJA FOOD TIENDA) recién
+      // existe desde el 26-11-2025. Antes todo entraba consolidado como 'TEJA FOOD',
+      // así que la venta del año anterior NO se puede atribuir a una caja: se deja en
+      // blanco y el consolidado se informa en una fila aparte.
+      const tf = esTejaFood(l.dep_id);
+      const vb = tf ? null : ventaDe(vAnt, l.pro_codigo_plu, l.dep_id);
+      if (tf) plusTejaFood.add(String(l.pro_codigo_plu));
+
+      ws.addRow({
+        dep_nombre:   l.dep_nombre,
+        plu:          l.pro_codigo_plu,
+        barra:        l.pro_codigo_barra || '',
+        producto:     l.pro_nombre_producto,
+        pedido,
+        folios:       l.folios,
+        vta_unid:     r2(va.unid),
+        vta_monto:    r2(va.monto),
+        mer_unid:     r2(ma.unid),
+        mer_monto:    r2(ma.monto),
+        dif:          r2(pedido - va.unid),
+        // Venta del año anterior: en blanco para Teja Food (ver nota de arriba).
+        vta_unid_aa:  vb ? r2(vb.unid)  : null,
+        vta_monto_aa: vb ? r2(vb.monto) : null,
+        // La merma siempre va consolidada por PLU: fact_mermas no distingue la caja.
+        mer_unid_aa:  r2(mb.unid),
+        mer_monto_aa: r2(mb.monto),
+        var_pct:      vb && vb.unid > 0 ? r2(((va.unid - vb.unid) / vb.unid) * 100) : null,
+      });
+
+      tot.pedido      += pedido;
+      tot.vta_unid    += va.unid;  tot.vta_monto    += va.monto;
+      tot.mer_unid    += ma.unid;  tot.mer_monto    += ma.monto;
+      tot.mer_unid_aa += mb.unid;  tot.mer_monto_aa += mb.monto;
+      if (vb) { tot.vta_unid_aa += vb.unid; tot.vta_monto_aa += vb.monto; }
     });
 
-    rows.forEach((l) => ws.addRow({
-      rev_folio: l.rev_folio,
-      rev_fecha: new Date(l.rev_fecha).toLocaleString('es-CL'),
-      usu_nombre: l.usu_nombre,
-      dep_nombre: l.dep_nombre,
-      pro_codigo_plu: l.pro_codigo_plu,
-      pro_codigo_barra: l.pro_codigo_barra || '',
-      pro_nombre_producto: l.pro_nombre_producto,
-      det_cantidad_pedir: l.det_cantidad_pedir,
-    }));
+    // Fila de totales
+    const filaTot = ws.addRow({
+      dep_nombre: 'TOTAL', pedido: r2(tot.pedido),
+      vta_unid: r2(tot.vta_unid), vta_monto: r2(tot.vta_monto),
+      mer_unid: r2(tot.mer_unid), mer_monto: r2(tot.mer_monto),
+      dif: r2(tot.pedido - tot.vta_unid),
+      vta_unid_aa: r2(tot.vta_unid_aa), vta_monto_aa: r2(tot.vta_monto_aa),
+      mer_unid_aa: r2(tot.mer_unid_aa), mer_monto_aa: r2(tot.mer_monto_aa),
+      var_pct: tot.vta_unid_aa > 0 ? r2(((tot.vta_unid - tot.vta_unid_aa) / tot.vta_unid_aa) * 100) : null,
+    });
+    filaTot.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    });
+
+    // Fila aparte con la venta consolidada de Teja Food del año anterior, que es el
+    // único dato que existe para ese período (sin separar por caja). Va fuera del
+    // TOTAL para no mezclarla con las cifras por departamento.
+    if (plusTejaFood.size) {
+      let unid = 0, monto = 0;
+      for (const plu of plusTejaFood) {
+        const v = ventaConsolidadaTF(vAnt, plu);
+        unid += v.unid; monto += v.monto;
+      }
+      ws.addRow({});
+      const filaTF = ws.addRow({
+        dep_nombre: 'TEJA FOOD (consolidado)',
+        producto:   `Venta del año anterior sin separar por caja · ${plusTejaFood.size} PLU pedidos`,
+        vta_unid_aa: r2(unid),
+        vta_monto_aa: r2(monto),
+      });
+      filaTF.eachCell((cell) => {
+        cell.font = { bold: true, italic: true, color: { argb: 'FF7C2D12' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+      });
+    }
+
+    // Formatos numéricos (unidades · pesos · porcentaje)
+    ['E', 'G', 'I', 'K', 'L', 'N'].forEach((c) => { ws.getColumn(c).numFmt = '#,##0.00'; });
+    ['H', 'J', 'M', 'O'].forEach((c) => { ws.getColumn(c).numFmt = '$#,##0'; });
+    ws.getColumn('P').numFmt = '0.0"%"';
+
+    // Hoja con el detalle de qué se está mirando (evita dudas al compartir el archivo).
+    const info = wb.addWorksheet('Info');
+    info.columns = [{ header: 'Campo', key: 'k', width: 26 }, { header: 'Valor', key: 'v', width: 70 }];
+    info.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    });
+    [
+      ['Período',              `${fIni} a ${fFin}`],
+      ['Período año anterior', `${unAno(fIni)} a ${unAno(fFin)}  (mismas fechas, un año antes)`],
+      ['Departamento',         nombreDep],
+      ['Productos',            pedidos.length],
+      ['Pedido',               'Suma de cantidades pedidas en revisiones completadas del período.'],
+      ['Venta',                'fact_ventas: unidades y venta neta ($).'],
+      ['Merma',                'fact_mermas: unidades mermadas y costo total ($).'],
+      ['Teja Food · venta',    'La venta del período se separa por caja (Local = TEJA FOOD TIENDA · Sala = TEJA FOOD SALA). Esa separación recién existe desde el 26-11-2025: antes todo se registraba consolidado como TEJA FOOD. Por eso las columnas de venta del AÑO ANTERIOR van en BLANCO para esos dos departamentos, y el consolidado se informa en una fila aparte al final de la planilla, fuera del TOTAL.'],
+      ['Teja Food · merma',    'La merma va consolidada por PLU en los dos períodos: fact_mermas no distingue la caja. En un export de "Todos" esa merma aparece en Local y en Sala, así que la fila TOTAL la cuenta dos veces para esos productos.'],
+      ['Generado',             new Date().toLocaleString('es-CL')],
+    ].forEach(([k, v]) => info.addRow({ k, v }));
+    info.getColumn('v').alignment = { wrapText: true, vertical: 'top' };
 
     const buffer = await wb.xlsx.writeBuffer();
+    // Nombre de archivo con el departamento para distinguir un export de otro.
+    // Se limpian tildes y caracteres raros porque el header HTTP es ASCII.
+    const slug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'depto';
+    const nombreArchivo = `consolidado_${slug(nombreDep)}_${fIni}_${fFin}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=consolidado_${Date.now()}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=${nombreArchivo}`);
     res.send(buffer);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[exportarExcel]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 }
 
 // GET /api/admin/master-productos

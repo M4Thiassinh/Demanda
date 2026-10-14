@@ -521,15 +521,25 @@ function UsuariosTab() {
 }
 
 // ── Tab Exportar ──────────────────────────────────────────────
+// Mismas fechas, un año antes (solo para mostrar el rango comparativo en pantalla;
+// el cálculo real lo hace el backend).
+const unAnoAntes = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${Number(s.slice(0, 4)) - 1}${s.slice(4)}` : '—')
+
+// Nombre de departamento → texto apto para nombre de archivo (sin tildes ni espacios).
+const slugify = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'depto'
+
 function ExportTab() {
   // Fecha local en formato YYYY-MM-DD (para inputs type=date)
   const fmtFecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  const hoyStr = fmtFecha(new Date())
+  // Por defecto AYER: la base analítica carga las ventas del día con un día de
+  // desfase, así que exportar "hoy" siempre saldría sin ventas ni mermas.
+  const ayerStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return fmtFecha(d) })()
 
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [fechaIni, setFI]        = useState(hoyStr)   // por defecto: hoy
-  const [fechaFin, setFF]        = useState(hoyStr)
+  const [fechaIni, setFI]        = useState(ayerStr)  // por defecto: ayer
+  const [fechaFin, setFF]        = useState(ayerStr)
   const [loading, setLoading]    = useState(false)
   const [error, setError]        = useState('')
 
@@ -546,13 +556,18 @@ function ExportTab() {
     setFI(fmtFecha(ini)); setFF(fmtFecha(hoy))
   }
 
+  // Nombre del archivo: incluye el departamento para no terminar con varios
+  // "consolidado" iguales en la carpeta de descargas.
+  const nombreDep = depSel ? (departamentos.find(d => d.dep_id === depSel)?.dep_nombre || depSel) : 'Todos'
+  const nombreArchivo = `consolidado_${slugify(nombreDep)}_${fechaIni}_${fechaFin}.xlsx`
+
   const exportar = async () => {
     setLoading(true); setError('')
     try {
       const { exportarExcel } = await import('../api')
       const resp = await exportarExcel({ dep_id: depSel || undefined, fecha_ini: fechaIni || undefined, fecha_fin: fechaFin || undefined })
       const url  = URL.createObjectURL(resp.data)
-      const a    = document.createElement('a'); a.href = url; a.download = `reposicion_${Date.now()}.xlsx`; a.click()
+      const a    = document.createElement('a'); a.href = url; a.download = nombreArchivo; a.click()
       URL.revokeObjectURL(url)
     } catch { setError('Error al exportar') }
     finally { setLoading(false) }
@@ -560,7 +575,21 @@ function ExportTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-gray-400 text-sm">Exporta un Excel consolidado con todas las revisiones completadas en el período.</p>
+      <p className="text-gray-400 text-sm">
+        Exporta un Excel con lo <strong className="text-gray-200">pedido</strong> por departamento en el período
+        (una fila por producto), cruzado con las <strong className="text-gray-200">ventas y mermas</strong> reales
+        de esas mismas fechas y las del <strong className="text-gray-200">año anterior</strong>.
+      </p>
+      <p className="text-xs text-gray-500">
+        Comparativo: <span className="text-gray-300 font-mono">{unAnoAntes(fechaIni)}</span> a{' '}
+        <span className="text-gray-300 font-mono">{unAnoAntes(fechaFin)}</span>
+      </p>
+      {fechaFin >= fmtFecha(new Date()) && (
+        <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          ⚠️ El rango incluye hoy. Las ventas y mermas se cargan con un día de desfase,
+          así que para hoy esas columnas saldrán en cero (lo pedido sí aparece).
+        </p>
+      )}
       <div>
         <label className="label">Departamento (opcional)</label>
         <select value={depSel} onChange={e => setDepSel(e.target.value)} className="input-field">
@@ -587,6 +616,9 @@ function ExportTab() {
       <button id="btn-exportar" onClick={exportar} disabled={loading} className="btn-primary w-full disabled:opacity-50">
         {loading ? '⏳ Generando…' : '📥 Descargar Excel'}
       </button>
+      <p className="text-xs text-gray-500 text-center">
+        Se descarga como <span className="text-gray-300 font-mono break-all">{nombreArchivo}</span>
+      </p>
     </div>
   )
 }
