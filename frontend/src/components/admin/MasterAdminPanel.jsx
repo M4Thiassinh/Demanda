@@ -7,6 +7,11 @@ import { getDepartamentos, getMasterProductos, bulkUpdateProductos, bulkDeletePr
 // Se replica acá para recalcular en vivo mientras se edita la tabla, sin ir al servidor.
 const num = (v, def = 0) => { const n = Number(v); return Number.isFinite(n) ? n : def }
 
+// Venta diaria y demanda total se muestran con 1 decimal. Solo se redondea para
+// MOSTRAR: por dentro se conserva la precisión, si no al escribir una demanda de 30
+// la venta diaria se achataría a 2.6 y la demanda volvería como 29.6 al recargar.
+const r1 = (v) => Math.round(num(v) * 10) / 10
+
 // Días de producción efectivos: override del producto > default del departamento.
 const diasProdDe = (row) => {
   const ov = row.pro_dias_produccion_override
@@ -154,6 +159,15 @@ export default function MasterAdminPanel() {
         [field]: value
       }
     }));
+  };
+
+  // Campo que el usuario está tecleando ahora ("<plu>:<campo>"). Mientras escribe se
+  // muestra tal cual lo teclea (si no, el input pelearía con el redondeo); al salir
+  // del campo vuelve a mostrarse con 1 decimal.
+  const [focusCampo, setFocusCampo] = useState(null);
+  const mostrar1Dec = (valor, campoId) => {
+    if (valor === undefined || valor === null || valor === '') return '';
+    return focusCampo === campoId ? valor : r1(valor);
   };
 
   // Igual que handleEdit pero para varios campos a la vez, que es lo que necesitan
@@ -541,8 +555,9 @@ export default function MasterAdminPanel() {
                           <input 
                             type="number" 
                             step="0.1"
-                            value={current.ventaDiaria !== undefined && current.ventaDiaria !== '' ? Number(current.ventaDiaria) : ''}
-                            onChange={e => editarVentaDiaria(localId, current, e.target.value)}
+                            value={mostrar1Dec(current.ventaDiaria, `${localId}:vd`)}
+                            onChange={e => { setFocusCampo(`${localId}:vd`); editarVentaDiaria(localId, current, e.target.value); }}
+                            onBlur={() => setFocusCampo(null)}
                             className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-emerald-300 font-mono"
                             placeholder="0.0"
                           />
@@ -569,8 +584,9 @@ export default function MasterAdminPanel() {
                           <input
                             type="number"
                             step="0.1"
-                            value={current.demandaTotalRequerida !== undefined && current.demandaTotalRequerida !== '' ? Number(current.demandaTotalRequerida) : ''}
-                            onChange={e => editarDemandaTotal(localId, current, e.target.value)}
+                            value={mostrar1Dec(current.demandaTotalRequerida, `${localId}:dda`)}
+                            onChange={e => { setFocusCampo(`${localId}:dda`); editarDemandaTotal(localId, current, e.target.value); }}
+                            onBlur={() => setFocusCampo(null)}
                             className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-brand-400 font-bold font-mono"
                             placeholder="0.0"
                             title="Editable: al cambiarla se ajusta sola la venta diaria"
