@@ -629,7 +629,13 @@ async function obtenerMasterProductos(req, res) {
       return {
         ...row,
         ventaDiaria: calc.ventaDiaria,
-        demandaTotalRequerida: calc.demandaTotalRequerida
+        demandaTotalRequerida: calc.demandaTotalRequerida,
+        // Días efectivos usados en el cálculo y el default del departamento. El panel
+        // Maestro los necesita para recalcular la demanda en vivo mientras se edita
+        // (y para despejar la venta diaria cuando se escribe la demanda total).
+        diasProdEfectivo: calc.diasProdEfectivo,
+        diasSegEfectivo:  calc.diasSegEfectivo,
+        dias_produccion_semana: config?.dias_produccion_semana ?? 6,
       };
     });
 

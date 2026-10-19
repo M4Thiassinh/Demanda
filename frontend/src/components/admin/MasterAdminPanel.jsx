@@ -2,6 +2,54 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Swal from 'sweetalert2';
 import { getDepartamentos, getMasterProductos, bulkUpdateProductos, bulkDeleteProductos, activarProductos, exportMasterExcel, loginMaster } from '../../api';
 
+// ── Fórmula de demanda (espejo de backend/src/services/DemandCalculatorService.js) ──
+// demanda_total = venta_diaria × (7 / dias_produccion + dias_seguridad)
+// Se replica acá para recalcular en vivo mientras se edita la tabla, sin ir al servidor.
+const num = (v, def = 0) => { const n = Number(v); return Number.isFinite(n) ? n : def }
+
+// Días de producción efectivos: override del producto > default del departamento.
+const diasProdDe = (row) => {
+  const ov = row.pro_dias_produccion_override
+  const n = (ov !== null && ov !== undefined && ov !== '') ? parseInt(ov, 10) : NaN
+  if (Number.isFinite(n) && n > 0) return n
+  return num(row.dias_produccion_semana, 6) || 6
+}
+
+// Días de seguridad efectivos: override > automático (sobre 20 u/día ⇒ 1 día, si no 2).
+const diasSegDe = (row, ventaDiaria) => {
+  const ov = row.pro_dias_seguridad_override
+  const n = (ov !== null && ov !== undefined && ov !== '') ? parseInt(ov, 10) : NaN
+  if (Number.isFinite(n) && n >= 0) return n
+  return ventaDiaria > 20 ? 1 : 2
+}
+
+const demandaDe = (row, ventaDiaria) => {
+  const vd = num(ventaDiaria, 0)
+  if (vd <= 0) return 0
+  return vd * (7 / diasProdDe(row) + diasSegDe(row, vd))
+}
+
+// Despeja la venta diaria necesaria para alcanzar una demanda total objetivo.
+// Ojo: cuando los días de seguridad son automáticos la relación NO es continua, porque
+// al superar las 20 u/día el stock de seguridad baja de 2 días a 1. En esa zona hay dos
+// ventas diarias que dan la misma demanda; se elige la más cercana a la que el producto
+// ya tenía, que es el cambio menos sorpresivo.
+const ventaDiariaParaDemanda = (row, demandaObjetivo, ventaDiariaActual) => {
+  const D = num(demandaObjetivo, 0)
+  if (D <= 0) return 0
+  const p = diasProdDe(row)
+  const ov = row.pro_dias_seguridad_override
+  const seg = (ov !== null && ov !== undefined && ov !== '') ? parseInt(ov, 10) : NaN
+  if (Number.isFinite(seg) && seg >= 0) return D / (7 / p + seg)
+
+  const candidatos = [1, 2]
+    .map((s) => D / (7 / p + s))
+    .filter((vd, i) => (i === 0 ? vd > 20 : vd <= 20))
+  if (!candidatos.length) return D / (7 / p + 2) // zona sin solución exacta: rama conservadora
+  const actual = num(ventaDiariaActual, 0)
+  return candidatos.reduce((a, b) => (Math.abs(b - actual) < Math.abs(a - actual) ? b : a))
+}
+
 export default function MasterAdminPanel() {
   // Autenticación Master
   const [isAuth, setIsAuth] = useState(localStorage.getItem('masterToken') !== null);
@@ -106,6 +154,46 @@ export default function MasterAdminPanel() {
         [field]: value
       }
     }));
+  };
+
+  // Igual que handleEdit pero para varios campos a la vez, que es lo que necesitan
+  // venta diaria y demanda total: al tocar uno hay que recalcular los otros.
+  const handleEditMulti = (plu, cambios) => {
+    setEdits(prev => ({ ...prev, [plu]: { ...prev[plu], ...cambios } }));
+  };
+
+  // Venta diaria → demanda total (y la venta del período, que es lo que se guarda).
+  const editarVentaDiaria = (plu, row, valor) => {
+    const vd = parseFloat(valor);
+    const dias = num(row.dias_historial, 30) || 30;
+    if (isNaN(vd)) return handleEditMulti(plu, { ventaDiaria: '', vta_total_periodo: 0, demandaTotalRequerida: 0 });
+    handleEditMulti(plu, {
+      ventaDiaria: vd,
+      vta_total_periodo: Number((vd * dias).toFixed(2)),
+      demandaTotalRequerida: Number(demandaDe(row, vd).toFixed(2)),
+    });
+  };
+
+  // Demanda total → venta diaria (camino inverso, para fijar directo cuánto se pide).
+  const editarDemandaTotal = (plu, row, valor) => {
+    const d = parseFloat(valor);
+    if (isNaN(d)) return handleEditMulti(plu, { demandaTotalRequerida: '' });
+    const vd = ventaDiariaParaDemanda(row, d, row.ventaDiaria);
+    const dias = num(row.dias_historial, 30) || 30;
+    handleEditMulti(plu, {
+      demandaTotalRequerida: d,
+      ventaDiaria: Number(vd.toFixed(2)),
+      vta_total_periodo: Number((vd * dias).toFixed(2)),
+    });
+  };
+
+  // Cambiar los días (producción o seguridad) mueve la demanda, no la venta diaria.
+  const editarDias = (plu, row, campo, valor) => {
+    const fila = { ...row, [campo]: valor };
+    handleEditMulti(plu, {
+      [campo]: valor,
+      demandaTotalRequerida: Number(demandaDe(fila, row.ventaDiaria).toFixed(2)),
+    });
   };
 
   const hasEdits = Object.keys(edits).length > 0;
@@ -403,7 +491,7 @@ export default function MasterAdminPanel() {
                   <th className="p-3 w-28 text-center" title="Venta diaria calculada">Vta. Diaria</th>
                   <th className="p-3 w-28 text-center" title="Factor de ajuste semanal (Días Prod)">Fact. Prod</th>
                   <th className="p-3 w-28 text-center" title="Stock de Seguridad Crítico (Días)">Días Seguridad</th>
-                  <th className="p-3 w-28 text-center" title="Demanda total calculada (si stock=0)">Dda Total</th>
+                  <th className="p-3 w-28 text-center" title="Cuánto se pide con stock 0. Se puede editar: al cambiarla se ajusta sola la venta diaria">Dda Total ✎</th>
                   <th className="p-3 w-28 text-center" title="Requerimiento mínimo (Lote)">Req. Mínimo</th>
                 </tr>
               </thead>
@@ -453,13 +541,8 @@ export default function MasterAdminPanel() {
                           <input 
                             type="number" 
                             step="0.1"
-                            value={current.ventaDiaria !== undefined ? Number(current.ventaDiaria) : ''} 
-                            onChange={e => {
-                              const val = parseFloat(e.target.value);
-                              const days = current.dias_historial || 30;
-                              handleEdit(localId, 'ventaDiaria', isNaN(val) ? '' : val);
-                              handleEdit(localId, 'vta_total_periodo', isNaN(val) ? 0 : Number((val * days).toFixed(2)));
-                            }}
+                            value={current.ventaDiaria !== undefined && current.ventaDiaria !== '' ? Number(current.ventaDiaria) : ''}
+                            onChange={e => editarVentaDiaria(localId, current, e.target.value)}
                             className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-emerald-300 font-mono"
                             placeholder="0.0"
                           />
@@ -467,8 +550,8 @@ export default function MasterAdminPanel() {
                         <td className="p-2">
                           <input 
                             type="number" 
-                            value={current.pro_dias_produccion_override ?? ''} 
-                            onChange={e => handleEdit(localId, 'pro_dias_produccion_override', e.target.value)}
+                            value={current.pro_dias_produccion_override ?? ''}
+                            onChange={e => editarDias(localId, current, 'pro_dias_produccion_override', e.target.value)}
                             className="w-full text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none text-sky-300"
                             placeholder="Auto"
                           />
@@ -476,14 +559,22 @@ export default function MasterAdminPanel() {
                         <td className="p-2">
                           <input 
                             type="number" 
-                            value={current.pro_dias_seguridad_override ?? ''} 
-                            onChange={e => handleEdit(localId, 'pro_dias_seguridad_override', e.target.value)}
+                            value={current.pro_dias_seguridad_override ?? ''}
+                            onChange={e => editarDias(localId, current, 'pro_dias_seguridad_override', e.target.value)}
                             className="w-full text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none text-rose-300"
                             placeholder="Auto"
                           />
                         </td>
-                        <td className="p-3 text-center text-brand-400 font-bold font-mono">
-                          {current.demandaTotalRequerida !== undefined ? Number(current.demandaTotalRequerida).toFixed(1) : '-'}
+                        <td className="p-2 w-28 text-center">
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={current.demandaTotalRequerida !== undefined && current.demandaTotalRequerida !== '' ? Number(current.demandaTotalRequerida) : ''}
+                            onChange={e => editarDemandaTotal(localId, current, e.target.value)}
+                            className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-brand-400 font-bold font-mono"
+                            placeholder="0.0"
+                            title="Editable: al cambiarla se ajusta sola la venta diaria"
+                          />
                         </td>
                         <td className="p-2">
                           <input 
