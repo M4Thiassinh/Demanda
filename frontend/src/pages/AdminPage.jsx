@@ -538,10 +538,35 @@ function ExportTab() {
 
   const [departamentos, setDeps] = useState([])
   const [depSel, setDepSel]      = useState('')
-  const [fechaIni, setFI]        = useState(ayerStr)  // por defecto: ayer
+  const [fechaIni, setFI]        = useState(ayerStr)  // lo elaborado · por defecto: ayer
   const [fechaFin, setFF]        = useState(ayerStr)
   const [loading, setLoading]    = useState(false)
   const [error, setError]        = useState('')
+
+  // Ventanas de venta y merma, independientes de la de elaboración. Mientras
+  // "mismasFechas" esté activo copian lo elaborado (comportamiento de siempre);
+  // al desactivarlo se pueden correr, que es lo que hace falta cuando lo elaborado
+  // un día se vende recién al día siguiente.
+  const [mismasFechas, setMismasFechas] = useState(true)
+  const [vtaIni, setVtaIni] = useState(ayerStr)
+  const [vtaFin, setVtaFin] = useState(ayerStr)
+  const [merIni, setMerIni] = useState(ayerStr)
+  const [merFin, setMerFin] = useState(ayerStr)
+
+  // Con el candado puesto, mover lo elaborado arrastra las otras dos ventanas.
+  useEffect(() => {
+    if (!mismasFechas) return
+    setVtaIni(fechaIni); setVtaFin(fechaFin)
+    setMerIni(fechaIni); setMerFin(fechaFin)
+  }, [mismasFechas, fechaIni, fechaFin])
+
+  // Corre una ventana N días respecto de lo elaborado (atajo para el caso típico:
+  // la venta de lo elaborado hoy se ve recién mañana).
+  const desplazar = (dias, setIni, setFin) => {
+    const mover = (s) => { const d = new Date(`${s}T00:00:00`); d.setDate(d.getDate() + dias); return fmtFecha(d) }
+    setMismasFechas(false)
+    setIni(mover(fechaIni)); setFin(mover(fechaFin))
+  }
 
   useEffect(() => { getDepartamentos().then(setDeps) }, [])
 
@@ -565,7 +590,12 @@ function ExportTab() {
     setLoading(true); setError('')
     try {
       const { exportarExcel } = await import('../api')
-      const resp = await exportarExcel({ dep_id: depSel || undefined, fecha_ini: fechaIni || undefined, fecha_fin: fechaFin || undefined })
+      const resp = await exportarExcel({
+        dep_id: depSel || undefined,
+        fecha_ini: fechaIni || undefined, fecha_fin: fechaFin || undefined,
+        vta_ini: vtaIni || undefined, vta_fin: vtaFin || undefined,
+        mer_ini: merIni || undefined, mer_fin: merFin || undefined,
+      })
       const url  = URL.createObjectURL(resp.data)
       const a    = document.createElement('a'); a.href = url; a.download = nombreArchivo; a.click()
       URL.revokeObjectURL(url)
@@ -576,18 +606,14 @@ function ExportTab() {
   return (
     <div className="space-y-4">
       <p className="text-gray-400 text-sm">
-        Exporta un Excel con lo <strong className="text-gray-200">pedido</strong> por departamento en el período
+        Exporta un Excel con lo <strong className="text-gray-200">elaborado</strong> por departamento
         (una fila por producto), cruzado con las <strong className="text-gray-200">ventas y mermas</strong> reales
-        de esas mismas fechas y las del <strong className="text-gray-200">año anterior</strong>.
+        y las del <strong className="text-gray-200">año anterior</strong>.
       </p>
-      <p className="text-xs text-gray-500">
-        Comparativo: <span className="text-gray-300 font-mono">{unAnoAntes(fechaIni)}</span> a{' '}
-        <span className="text-gray-300 font-mono">{unAnoAntes(fechaFin)}</span>
-      </p>
-      {fechaFin >= fmtFecha(new Date()) && (
+      {(vtaFin >= fmtFecha(new Date()) || merFin >= fmtFecha(new Date())) && (
         <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          ⚠️ El rango incluye hoy. Las ventas y mermas se cargan con un día de desfase,
-          así que para hoy esas columnas saldrán en cero (lo pedido sí aparece).
+          ⚠️ La ventana de ventas o mermas llega hasta hoy. Esos datos se cargan con un día
+          de desfase, así que para hoy esas columnas saldrán en cero (lo elaborado sí aparece).
         </p>
       )}
       <div>
@@ -597,20 +623,87 @@ function ExportTab() {
           {departamentos.map(d => <option key={d.dep_id} value={d.dep_id}>{d.dep_nombre}</option>)}
         </select>
       </div>
-      <div>
-        <label className="label">Rango rápido</label>
-        <div className="flex flex-wrap gap-2">
-          {[['hoy', 'Hoy'], ['ayer', 'Ayer'], ['7d', 'Últimos 7 días'], ['mes', 'Este mes']].map(([k, txt]) => (
-            <button key={k} type="button" onClick={() => setRango(k)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-brand-500 transition-colors">
-              {txt}
-            </button>
-          ))}
+      {/* ── 1. Lo elaborado ─────────────────────────────── */}
+      <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-3 space-y-3">
+        <p className="text-sm font-bold text-gray-200">🏭 Elaborado</p>
+        <div>
+          <label className="label">Rango rápido</label>
+          <div className="flex flex-wrap gap-2">
+            {[['hoy', 'Hoy'], ['ayer', 'Ayer'], ['7d', 'Últimos 7 días'], ['mes', 'Este mes']].map(([k, txt]) => (
+              <button key={k} type="button" onClick={() => setRango(k)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-brand-500 transition-colors">
+                {txt}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="label">Desde</label><input type="date" value={fechaIni} onChange={e => setFI(e.target.value)} className="input-field" /></div>
+          <div><label className="label">Hasta</label><input type="date" value={fechaFin} onChange={e => setFF(e.target.value)} className="input-field" /></div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div><label className="label">Desde</label><input type="date" value={fechaIni} onChange={e => setFI(e.target.value)} className="input-field" /></div>
-        <div><label className="label">Hasta</label><input type="date" value={fechaFin} onChange={e => setFF(e.target.value)} className="input-field" /></div>
+
+      {/* ── 2. Candado: ventas y mermas siguen a lo elaborado ─ */}
+      <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-gray-700 bg-gray-800/40 p-3">
+        <input type="checkbox" checked={mismasFechas} onChange={e => setMismasFechas(e.target.checked)}
+          className="mt-0.5 w-4 h-4 rounded bg-gray-900 border-gray-600" />
+        <span className="text-sm text-gray-300">
+          Usar las mismas fechas para ventas y mermas
+          <span className="block text-xs text-gray-500 mt-0.5">
+            Desmárcalo si lo elaborado se vende otro día: una venta del mismo día puede
+            salir de stock anterior y no de lo que acabas de elaborar.
+          </span>
+        </span>
+      </label>
+
+      {/* ── 3. Ventanas independientes ───────────────────── */}
+      {!mismasFechas && (
+        <>
+          <div className="rounded-xl border border-emerald-700/40 bg-emerald-900/10 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-sm font-bold text-emerald-300">💰 Ventas</p>
+              <div className="flex gap-1.5">
+                {[['+1 día', 1], ['+2 días', 2], ['= elaborado', 0]].map(([txt, d]) => (
+                  <button key={txt} type="button" onClick={() => desplazar(d, setVtaIni, setVtaFin)}
+                    className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-emerald-500 transition-colors">
+                    {txt}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Desde</label><input type="date" value={vtaIni} onChange={e => setVtaIni(e.target.value)} className="input-field" /></div>
+              <div><label className="label">Hasta</label><input type="date" value={vtaFin} onChange={e => setVtaFin(e.target.value)} className="input-field" /></div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-rose-700/40 bg-rose-900/10 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-sm font-bold text-rose-300">🗑️ Mermas</p>
+              <div className="flex gap-1.5">
+                {[['+1 día', 1], ['+2 días', 2], ['= elaborado', 0]].map(([txt, d]) => (
+                  <button key={txt} type="button" onClick={() => desplazar(d, setMerIni, setMerFin)}
+                    className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-rose-500 transition-colors">
+                    {txt}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Desde</label><input type="date" value={merIni} onChange={e => setMerIni(e.target.value)} className="input-field" /></div>
+              <div><label className="label">Hasta</label><input type="date" value={merFin} onChange={e => setMerFin(e.target.value)} className="input-field" /></div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Resumen de lo que se va a exportar */}
+      <div className="text-xs text-gray-500 space-y-0.5 border-l-2 border-gray-700 pl-3">
+        <p>Elaborado: <span className="text-gray-300 font-mono">{fechaIni}</span> → <span className="text-gray-300 font-mono">{fechaFin}</span></p>
+        <p>Ventas: <span className="text-emerald-300/80 font-mono">{vtaIni}</span> → <span className="text-emerald-300/80 font-mono">{vtaFin}</span>
+          <span className="text-gray-600"> · año anterior {unAnoAntes(vtaIni)} → {unAnoAntes(vtaFin)}</span></p>
+        <p>Mermas: <span className="text-rose-300/80 font-mono">{merIni}</span> → <span className="text-rose-300/80 font-mono">{merFin}</span>
+          <span className="text-gray-600"> · año anterior {unAnoAntes(merIni)} → {unAnoAntes(merFin)}</span></p>
       </div>
       {error && <p className="text-rose-400 text-sm text-center">{error}</p>}
       <button id="btn-exportar" onClick={exportar} disabled={loading} className="btn-primary w-full disabled:opacity-50">

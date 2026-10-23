@@ -324,9 +324,13 @@ const columnaPluMermas = async () =>
   (await columnasDe('fact_mermas')).has('pro_codigo_plu') ? 'pro_codigo_plu' : 'id_producto';
 
 // GET /api/admin/export
-// Exporta el consolidado de lo PEDIDO por departamento en el rango y lo cruza con
-// las VENTAS y MERMAS reales de la base analítica, más el mismo rango del año
-// anterior (mismas fechas, un año antes) para comparar.
+// Exporta el consolidado de lo ELABORADO (pedido) por departamento y lo cruza con
+// las VENTAS y MERMAS reales de la base analítica, más esas mismas ventanas un año
+// antes para comparar.
+//
+// Las tres ventanas son INDEPENDIENTES (fecha_*, vta_*, mer_*): lo que se elabora un
+// día no se vende necesariamente ese mismo día, porque una venta de esa fecha puede
+// estar saliendo de stock anterior. Si solo se envía fecha_*, las otras dos la copian.
 //
 // Notas de negocio:
 //  · Teja Food (1347 Local / 2347 Sala) vende los MISMOS PLU en dos cajas; las
@@ -335,7 +339,7 @@ const columnaPluMermas = async () =>
 //    separar por caja, así que en esos dos deptos se muestra la merma total del PLU.
 async function exportarExcel(req, res) {
   try {
-    const { dep_id, fecha_ini, fecha_fin } = req.query;
+    const { dep_id, fecha_ini, fecha_fin, vta_ini, vta_fin, mer_ini, mer_fin } = req.query;
 
     // Rango obligatorio para poder cruzar con ventas/mermas. Si no viene, se usa
     // AYER: la base analítica carga las ventas con un día de desfase, así que un
@@ -346,13 +350,25 @@ async function exportarExcel(req, res) {
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
     };
     const esFecha = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    // Ventana de lo ELABORADO (las revisiones).
     const fIni = esFecha(fecha_ini) ? fecha_ini : ayerStr();
     const fFin = esFecha(fecha_fin) ? fecha_fin : fIni;
+    // Ventanas de VENTAS y MERMAS: independientes de la anterior. Lo elaborado un día
+    // no se vende necesariamente ese mismo día (lo que se vende puede salir de stock
+    // anterior), así que el usuario puede desfasarlas. Si no se envían, se usan las
+    // mismas fechas de lo elaborado, que era el comportamiento previo.
+    const vIni = esFecha(vta_ini) ? vta_ini : fIni;
+    const vFin = esFecha(vta_fin) ? vta_fin : fFin;
+    const mIni = esFecha(mer_ini) ? mer_ini : fIni;
+    const mFin = esFecha(mer_fin) ? mer_fin : fFin;
     // id_fecha de la base analítica es un entero YYYYMMDD.
     const aId   = (s) => Number(s.replace(/-/g, ''));
     const unAno = (s) => `${Number(s.slice(0, 4)) - 1}${s.slice(4)}`;
-    const [iniAct, finAct] = [aId(fIni), aId(fFin)];
-    const [iniAnt, finAnt] = [aId(unAno(fIni)), aId(unAno(fFin))];
+    // Cada bloque compara contra SU propia ventana corrida un año atrás.
+    const [vIniAct, vFinAct] = [aId(vIni), aId(vFin)];
+    const [vIniAnt, vFinAnt] = [aId(unAno(vIni)), aId(unAno(vFin))];
+    const [mIniAct, mFinAct] = [aId(mIni), aId(mFin)];
+    const [mIniAnt, mFinAnt] = [aId(unAno(mIni)), aId(unAno(mFin))];
 
     // Nombre del departamento para el archivo y la hoja Info. Se consulta aparte
     // (y no se toma de los pedidos) para que salga bien aunque el período no tenga
@@ -420,8 +436,8 @@ async function exportarExcel(req, res) {
     };
 
     const [vAct, vAnt, mAct, mAnt] = await Promise.all([
-      ventasDe(iniAct, finAct), ventasDe(iniAnt, finAnt),
-      mermasDe(iniAct, finAct), mermasDe(iniAnt, finAnt),
+      ventasDe(vIniAct, vFinAct), ventasDe(vIniAnt, vFinAnt),
+      mermasDe(mIniAct, mFinAct), mermasDe(mIniAnt, mFinAnt),
     ]);
 
     // Teja Food: la venta del depto es solo la de SU caja.
@@ -574,11 +590,15 @@ async function exportarExcel(req, res) {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
     });
     [
-      ['Período',              `${fIni} a ${fFin}`],
-      ['Período año anterior', `${unAno(fIni)} a ${unAno(fFin)}  (mismas fechas, un año antes)`],
+      ['Período elaborado',    `${fIni} a ${fFin}`],
+      ['Período ventas',       `${vIni} a ${vFin}${vIni === fIni && vFin === fFin ? '  (mismas fechas de lo elaborado)' : '  (desfasado a propósito)'}`],
+      ['Período mermas',       `${mIni} a ${mFin}${mIni === fIni && mFin === fFin ? '  (mismas fechas de lo elaborado)' : '  (desfasado a propósito)'}`],
+      ['Ventas año anterior',  `${unAno(vIni)} a ${unAno(vFin)}  (mismas fechas, un año antes)`],
+      ['Mermas año anterior',  `${unAno(mIni)} a ${unAno(mFin)}  (mismas fechas, un año antes)`],
       ['Departamento',         nombreDep],
       ['Productos',            pedidos.length],
-      ['Pedido',               'Suma de cantidades pedidas en revisiones completadas del período.'],
+      ['Pedido',               'Suma de cantidades pedidas en revisiones completadas del período elaborado.'],
+      ['Por qué 3 períodos',   'Lo elaborado un día no se vende necesariamente ese mismo día: una venta del mismo día puede salir de stock anterior. Por eso las ventanas de venta y merma se pueden correr respecto de la de elaboración.'],
       ['Venta',                'fact_ventas: unidades y venta neta ($).'],
       ['Merma',                'fact_mermas: unidades mermadas y costo total ($).'],
       ['Teja Food · venta',    'La venta del período se separa por caja (Local = TEJA FOOD TIENDA · Sala = TEJA FOOD SALA). Esa separación recién existe desde el 26-11-2025: antes todo se registraba consolidado como TEJA FOOD. Por eso las columnas de venta del AÑO ANTERIOR van en BLANCO para esos dos departamentos, y el consolidado se informa en una fila aparte al final de la planilla, fuera del TOTAL.'],

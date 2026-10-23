@@ -67,6 +67,9 @@ export const actualizarDemandaVentas = (dias, depId, agregarNuevos) => api.post(
 export const actualizarDemandaVentasProducto = (plu, depId, dias) => api.post('/admin/actualizar-demanda-ventas-producto', { plu, dep_id: depId, dias }).then(r => r.data)
 export const getProducto = (plu, depId) => api.get(`/admin/productos/${plu}`, { params: { dep_id: depId } }).then(r => r.data)
 export const updateProducto = (plu, depId, data) => api.put(`/admin/productos/${plu}`, { ...data, dep_id: depId }).then(r => r.data)
+// params: { dep_id, fecha_ini, fecha_fin, vta_ini, vta_fin, mer_ini, mer_fin }
+// Las ventanas de venta y merma son independientes de la de elaboración; si no se
+// envían, el backend usa las mismas fechas de lo elaborado.
 export const exportarExcel = (params) => api.get('/admin/export', { params, responseType: 'blob' })
 
 // Admin Master Panel
