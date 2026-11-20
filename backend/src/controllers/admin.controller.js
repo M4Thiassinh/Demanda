@@ -635,7 +635,8 @@ async function obtenerMasterProductos(req, res) {
       `SELECT pro_codigo_plu, pro_codigo_barra, pro_nombre_producto,
               vta_total_periodo, dias_historial, dep_id,
               pro_dias_produccion_override, pro_dias_seguridad_override,
-              pro_dias_elaboracion, pro_cantidad_minima, pro_activo
+              pro_dias_elaboracion, pro_cantidad_minima, pro_activo,
+              pro_demanda_override
          FROM productos WHERE dep_id = ?
         ORDER BY pro_activo DESC, pro_nombre_producto`,
       [dep_id]
@@ -650,6 +651,10 @@ async function obtenerMasterProductos(req, res) {
         ...row,
         ventaDiaria: calc.ventaDiaria,
         demandaTotalRequerida: calc.demandaTotalRequerida,
+        // Para que el panel marque si la demanda está fijada a mano y pueda
+        // ofrecer volver al valor automático.
+        demandaCalculada:  calc.demandaCalculada,
+        demandaEsOverride: calc.demandaEsOverride,
         // Días efectivos usados en el cálculo y el default del departamento. El panel
         // Maestro los necesita para recalcular la demanda en vivo mientras se edita
         // (y para despejar la venta diaria cuando se escribe la demanda total).
@@ -678,31 +683,43 @@ async function actualizarMasterProductosBulk(req, res) {
     for (const p of productos) {
       // Determinar si es un insert (nuevo producto) o un update
       if (p.isNew) {
+        // La venta NO la decide el usuario: se lee de las ventas reales de los
+        // últimos 30 días, igual que hace la actualización diaria. Así un producto
+        // recién creado nace con la misma base que el resto.
+        const DIAS_ALTA = 30;
+        // venta.dias puede ser menor a 30 si el producto es nuevo: se divide por los
+        // dias que lleva vendiendose, no por 30. Y se guarda la fecha de su primera
+        // venta para que la actualizacion diaria mantenga ese criterio.
+        const venta = await ventasUltimosDias(p.pro_codigo_plu, dep_id, DIAS_ALTA);
         await connection.query(
-          `INSERT INTO productos 
-            (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id, pro_dias_produccion_override, pro_dias_seguridad_override, pro_cantidad_minima) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO productos
+            (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id, pro_dias_produccion_override, pro_dias_seguridad_override, pro_cantidad_minima, pro_demanda_override, pro_primera_venta)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.pro_codigo_plu, p.pro_codigo_barra || null, p.pro_nombre_producto,
-            toNull(p.vta_total_periodo) || 0, toNull(p.dias_historial) || 30, dep_id,
-            toNull(p.pro_dias_produccion_override), toNull(p.pro_dias_seguridad_override), toNull(p.pro_cantidad_minima) || 0
+            venta.unidades, venta.dias, dep_id,
+            toNull(p.pro_dias_produccion_override), toNull(p.pro_dias_seguridad_override), toNull(p.pro_cantidad_minima) || 0,
+            toNull(p.pro_demanda_override), venta.primeraVenta
           ]
         );
       } else {
+        // vta_total_periodo y dias_historial ya NO se tocan desde acá: la venta
+        // diaria es automática (tarea diaria de app.js) y en el panel está
+        // bloqueada. Lo que el jefe sí puede fijar es la demanda total, que va a
+        // su propia columna para que la actualización diaria no la pise.
         await connection.query(
           `UPDATE productos
               SET pro_codigo_barra              = COALESCE(?, pro_codigo_barra),
                   pro_nombre_producto           = COALESCE(?, pro_nombre_producto),
-                  vta_total_periodo             = COALESCE(?, vta_total_periodo),
-                  dias_historial                = COALESCE(?, dias_historial),
                   pro_dias_produccion_override  = ?,
                   pro_dias_seguridad_override   = ?,
-                  pro_cantidad_minima           = ?
+                  pro_cantidad_minima           = ?,
+                  pro_demanda_override          = ?
             WHERE pro_codigo_plu = ? AND dep_id = ?`,
           [
-            p.pro_codigo_barra ?? null, p.pro_nombre_producto ?? null, 
-            toNull(p.vta_total_periodo), toNull(p.dias_historial),
+            p.pro_codigo_barra ?? null, p.pro_nombre_producto ?? null,
             toNull(p.pro_dias_produccion_override), toNull(p.pro_dias_seguridad_override), toNull(p.pro_cantidad_minima) || 0,
+            toNull(p.pro_demanda_override),
             p.pro_codigo_plu, dep_id
           ]
         );
@@ -921,26 +938,153 @@ async function eliminarUsuario(req, res) {
 const TEJAFOOD_UNIDAD = { '1347': 'TEJA FOOD TIENDA', '2347': 'TEJA FOOD SALA' };
 const TEJAFOOD_DEPS = Object.keys(TEJAFOOD_UNIDAD);
 
-async function actualizarDemandaDesdeVentas(req, res) {
+// Unidades vendidas de UN PLU en los últimos N días, respetando la separación por
+// caja de Teja Food. Lo usan la creación de productos (para no pedirle la venta al
+// usuario) y el endpoint que alimenta ese formulario.
+async function ventasUltimosDias(plu, depId, dias = 30) {
+  const esTF = TEJAFOOD_DEPS.includes(String(depId));
+  const unidad = esTF ? TEJAFOOD_UNIDAD[depId] : null;
+  const { rows } = await db.query(
+    `SELECT COALESCE(SUM(fv.cantidad_unidades), 0) AS u
+       FROM db_analitica_supermercado.fact_ventas fv
+      WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+        AND fv.id_fecha <  CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+        AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+        AND (? IS NULL OR fv.unidad_negocio = ?)`,
+    [dias, String(plu), unidad, unidad]
+  );
+  const unidades = Math.round((Number(rows[0]?.u) || 0) * 100) / 100;
+
+  // Primera venta HISTÓRICA del PLU (no solo dentro de la ventana). Es lo que
+  // distingue un producto nuevo de uno viejo que vende poco: si la primera venta de
+  // su vida cae dentro de la ventana, el producto lleva menos días vendiéndose que
+  // los que dura el período y hay que dividir por los días que realmente lleva.
+  // Usa idx_fact_ventas_id_producto, así que para un solo PLU es inmediato.
+  const { rows: pv } = await db.query(
+    `SELECT STR_TO_DATE(MIN(fv.id_fecha), '%Y%m%d') AS primera
+       FROM db_analitica_supermercado.fact_ventas fv
+      WHERE CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+        AND (? IS NULL OR fv.unidad_negocio = ?)`,
+    [String(plu), unidad, unidad]
+  );
+  const primeraVenta = pv[0]?.primera || null;
+
+  // Días efectivos del período: los pedidos, o los que lleva vendiéndose si es menos.
+  let diasEfectivos = dias;
+  let esNuevo = false;
+  if (primeraVenta) {
+    const ayer = new Date(); ayer.setHours(0, 0, 0, 0); ayer.setDate(ayer.getDate() - 1);
+    const desde = new Date(primeraVenta); desde.setHours(0, 0, 0, 0);
+    const vividos = Math.floor((ayer - desde) / 86400000) + 1;
+    if (Number.isFinite(vividos) && vividos >= 1 && vividos < dias) { diasEfectivos = vividos; esNuevo = true; }
+  }
+
+  const p = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return {
+    unidades,
+    dias: diasEfectivos,
+    diasPedidos: dias,
+    ventaDiaria: Math.round((unidades / diasEfectivos) * 10000) / 10000,
+    primeraVenta: primeraVenta ? p(new Date(primeraVenta)) : null,
+    esNuevo,
+  };
+}
+
+// GET /api/admin/venta-plu?plu=123&dep_id=13&dias=30
+// Devuelve lo vendido de ese PLU en la ventana pedida, para que el formulario de
+// "Nuevo Producto" muestre la venta diaria en vez de que la escriba el usuario.
+async function obtenerVentaPlu(req, res) {
   try {
-    let dias = parseInt(req.body?.dias, 10);
+    const plu = String(req.query?.plu || '').trim();
+    const depId = String(req.query?.dep_id || '').trim();
+    let dias = parseInt(req.query?.dias, 10);
+    if (!plu || !depId) return res.status(400).json({ error: 'plu y dep_id requeridos' });
     if (!Number.isFinite(dias) || dias < 1 || dias > 365) dias = 30;
-    const depId = (req.body?.dep_id && String(req.body.dep_id).trim()) || null;
-    const agregarNuevos = req.body?.agregar_nuevos === true || req.body?.agregar_nuevos === 'true' || req.body?.agregar_nuevos === 1;
-    let afectados = 0, agregados = 0;
+
+    const venta = await ventasUltimosDias(plu, depId, dias);
+    // De paso, el nombre y el código de barra del maestro de la analítica, para
+    // que no haya que tipearlos a mano (si el PLU no existe ahí, van vacíos).
+    const { rows: dim } = await db.query(
+      `SELECT pro_nombre_producto AS nombre, pro_codigo_barra AS barra
+         FROM db_analitica_supermercado.dim_productos
+        WHERE CAST(pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+        LIMIT 1`,
+      [plu]
+    );
+    // Y los días que se aplicarían si el producto se deja en "Auto", para que el
+    // formulario muestre el número en vez de hacer adivinar qué significa "Auto".
+    const config = await ConfigService.getConfig(depId);
+    const diasProdAuto = config.dias_produccion_semana;
+    // Se evalúa sobre la venta diaria REAL (ya dividida por los días que el producto
+    // lleva vendiéndose), que es la que después usará el motor de cálculo.
+    const diasSegAuto  = venta.ventaDiaria > 20 ? 1 : 2;
+
+    res.json({
+      ok: true, plu, dep_id: depId, ...venta,
+      nombre: dim[0]?.nombre || null, barra: dim[0]?.barra || null,
+      dias_produccion_semana: diasProdAuto,
+      dias_prod_auto: diasProdAuto,
+      dias_seg_auto: diasSegAuto,
+    });
+  } catch (err) {
+    console.error('[obtenerVentaPlu]', err.message);
+    res.status(500).json({ error: 'No se pudo leer la venta del producto: ' + err.message });
+  }
+}
+
+// Núcleo reutilizable: lo llaman el endpoint de abajo (botón del panel Admin) y la
+// tarea diaria de app.js. Devuelve el resumen en vez de responder HTTP.
+// Días del período para cada producto. Normalmente son los `dias` pedidos, pero un
+// producto recién lanzado no tiene tantos días de vida: dividir sus ventas por 30
+// subestimaría su venta diaria. Con pro_primera_venta se acota al tiempo que lleva
+// vendiéndose. Es aritmética sobre una columna, sin cruzar otra vez con fact_ventas.
+const SQL_DIAS_PERIODO = `
+  CASE WHEN p.pro_primera_venta IS NULL THEN ?
+       ELSE LEAST(?, GREATEST(1, DATEDIFF(CURDATE() - INTERVAL 1 DAY, p.pro_primera_venta) + 1))
+  END`;
+
+async function refrescarDemandaDesdeVentas({ dias = 30, depId = null, agregarNuevos = false } = {}) {
+  let afectados = 0, agregados = 0;
+
+  // Toda la secuencia va por UNA conexión: las tablas temporales son por conexión y
+  // el pool entrega una distinta en cada query.
+  const conn = await db.pool.getConnection();
+  try {
+    // ── Por qué tablas temporales ──────────────────────────────────────────────
+    // La versión anterior cruzaba productos contra una subconsulta agregada. Esa
+    // tabla derivada no tiene índice y el CAST del PLU impide que MySQL le genere
+    // uno, así que la recorría entera por cada producto: ~6.100 × ~640.000 filas.
+    // Materializando el agregado en una temporal con PRIMARY KEY, el cruce pasa a
+    // ser una búsqueda por índice por producto.
+    //
+    // Además se fuerza idx_fact_ventas_id_fecha: por su cuenta MySQL prefería el
+    // índice de PLU (para ahorrarse el filesort del GROUP BY) y terminaba leyendo
+    // los 5,2 millones de registros en vez del rango de 30 días.
+    await conn.query('DROP TEMPORARY TABLE IF EXISTS tmp_vta_plu');
+    await conn.query(`
+      CREATE TEMPORARY TABLE tmp_vta_plu (
+        plu VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        u   DECIMAL(14,2) NOT NULL,
+        PRIMARY KEY (plu)
+      ) ENGINE=InnoDB`);
+    await conn.query(
+      `INSERT INTO tmp_vta_plu (plu, u)
+       SELECT CAST(fv.pro_codigo_plu AS CHAR), SUM(fv.cantidad_unidades)
+         FROM db_analitica_supermercado.fact_ventas fv FORCE INDEX (idx_fact_ventas_id_fecha)
+        WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+          AND fv.id_fecha <  CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+          AND fv.pro_codigo_plu IS NOT NULL
+        GROUP BY fv.pro_codigo_plu`,
+      [dias]
+    );
 
     // 1) Departamentos normales (todos menos Teja Food): suma TODAS las ventas del PLU.
     if (!depId || !TEJAFOOD_DEPS.includes(depId)) {
-      const { rows: r1 } = await db.query(
+      const [r1] = await conn.query(
         `UPDATE productos p
-           LEFT JOIN (
-             SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
-               FROM db_analitica_supermercado.fact_ventas fv
-              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
-                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-              GROUP BY fv.pro_codigo_plu
-           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
-            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+           LEFT JOIN tmp_vta_plu v ON v.plu = p.pro_codigo_plu
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2),
+                p.dias_historial    = ${SQL_DIAS_PERIODO}
           WHERE p.dep_id NOT IN ('1347','2347') AND (? IS NULL OR p.dep_id = ?)`,
         [dias, dias, depId, depId]
       );
@@ -949,83 +1093,114 @@ async function actualizarDemandaDesdeVentas(req, res) {
 
     // 2) Teja Food (1347/2347): separa las ventas por unidad_negocio según el depto.
     if (!depId || TEJAFOOD_DEPS.includes(depId)) {
-      const { rows: r2 } = await db.query(
+      await conn.query('DROP TEMPORARY TABLE IF EXISTS tmp_vta_tf');
+      await conn.query(`
+        CREATE TEMPORARY TABLE tmp_vta_tf (
+          plu VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+          un  VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+          u   DECIMAL(14,2) NOT NULL,
+          PRIMARY KEY (plu, un)
+        ) ENGINE=InnoDB`);
+      await conn.query(
+        `INSERT INTO tmp_vta_tf (plu, un, u)
+         SELECT CAST(fv.pro_codigo_plu AS CHAR), fv.unidad_negocio, SUM(fv.cantidad_unidades)
+           FROM db_analitica_supermercado.fact_ventas fv FORCE INDEX (idx_fact_ventas_id_fecha)
+          WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+            AND fv.id_fecha <  CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+            AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
+            AND fv.pro_codigo_plu IS NOT NULL
+          GROUP BY fv.pro_codigo_plu, fv.unidad_negocio`,
+        [dias]
+      );
+      const [r2] = await conn.query(
         `UPDATE productos p
-           LEFT JOIN (
-             SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
-               FROM db_analitica_supermercado.fact_ventas fv
-              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
-                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-                AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
-              GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
-           ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
-              AND v.unidad_negocio = CASE p.dep_id WHEN '1347' THEN 'TEJA FOOD TIENDA' WHEN '2347' THEN 'TEJA FOOD SALA' END
-            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
+           LEFT JOIN tmp_vta_tf v
+                  ON v.plu = p.pro_codigo_plu
+                 AND v.un  = CASE p.dep_id WHEN '1347' THEN 'TEJA FOOD TIENDA' WHEN '2347' THEN 'TEJA FOOD SALA' END
+            SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2),
+                p.dias_historial    = ${SQL_DIAS_PERIODO}
           WHERE p.dep_id IN ('1347','2347') AND (? IS NULL OR p.dep_id = ?)`,
         [dias, dias, depId, depId]
       );
       afectados += r2.affectedRows;
     }
+  } finally {
+    // Las temporales sobreviven a la conexión mientras el pool la reutilice, así que
+    // se borran siempre, incluso si algo falló a mitad de camino.
+    try { await conn.query('DROP TEMPORARY TABLE IF EXISTS tmp_vta_plu'); } catch (_) {}
+    try { await conn.query('DROP TEMPORARY TABLE IF EXISTS tmp_vta_tf'); } catch (_) {}
+    conn.release();
+  }
 
-    // 3) (Opcional) Agregar productos NUEVOS vendidos que no están en el catálogo.
-    //    - Deptos normales: se asigna por nombre (dim_productos.dep_nombre → demanda).
-    //    - Teja Food: se asigna por la CAJA de venta (unidad_negocio):
-    //        TIENDA → Local (1347) · SALA → Sala (2347). Si vende en ambas, se crea en las dos.
-    if (agregarNuevos) {
-      const { rows: ins } = await db.query(
-        `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
-         SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?, d.dep_id
-           FROM (
-             SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
-               FROM db_analitica_supermercado.fact_ventas fv
-              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
-                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-                AND fv.pro_codigo_plu IS NOT NULL
-              GROUP BY fv.pro_codigo_plu
-           ) v
-           JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
-           JOIN departamentos d ON d.dep_nombre COLLATE utf8mb4_0900_ai_ci = dp.dep_nombre COLLATE utf8mb4_0900_ai_ci
-           LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu AND p2.dep_id = d.dep_id
-          WHERE p2.pro_codigo_plu IS NULL
-            AND d.dep_id NOT IN ('1347','2347')
-            AND (? IS NULL OR d.dep_id = ?)`,
-        [dias, dias, depId, depId]
-      );
-      agregados += ins.affectedRows;
-
-      // 3b) Teja Food: los nuevos se asignan por la CAJA de venta (unidad_negocio).
-      //     TIENDA → Local (1347) · SALA → Sala (2347). Vendido en ambas → se crea en las dos.
-      const { rows: insTF } = await db.query(
-        `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
-         SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?,
-                CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
-           FROM (
-             SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
-               FROM db_analitica_supermercado.fact_ventas fv
-              WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
-                AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-                AND fv.pro_codigo_plu IS NOT NULL
-                AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
-              GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
-           ) v
-           JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
-           LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu
-              AND p2.dep_id = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
-          WHERE p2.pro_codigo_plu IS NULL
-            AND (? IS NULL OR ? = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END)`,
-        [dias, dias, depId, depId]
-      );
-      agregados += insTF.affectedRows;
-    }
-
-    const { rows } = await db.query(
-      `SELECT COUNT(*) AS total, SUM(vta_total_periodo > 0) AS con_venta
-         FROM productos WHERE (? IS NULL OR dep_id = ?)`,
-      [depId, depId]
+  // 3) (Opcional) Agregar productos NUEVOS vendidos que no están en el catálogo.
+  //    - Deptos normales: se asigna por nombre (dim_productos.dep_nombre → demanda).
+  //    - Teja Food: se asigna por la CAJA de venta (unidad_negocio):
+  //        TIENDA → Local (1347) · SALA → Sala (2347). Si vende en ambas, se crea en las dos.
+  if (agregarNuevos) {
+    const { rows: ins } = await db.query(
+      `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
+       SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?, d.dep_id
+         FROM (
+           SELECT fv.pro_codigo_plu, SUM(fv.cantidad_unidades) AS u
+             FROM db_analitica_supermercado.fact_ventas fv
+            WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+              AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+              AND fv.pro_codigo_plu IS NOT NULL
+            GROUP BY fv.pro_codigo_plu
+         ) v
+         JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
+         JOIN departamentos d ON d.dep_nombre COLLATE utf8mb4_0900_ai_ci = dp.dep_nombre COLLATE utf8mb4_0900_ai_ci
+         LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu AND p2.dep_id = d.dep_id
+        WHERE p2.pro_codigo_plu IS NULL
+          AND d.dep_id NOT IN ('1347','2347')
+          AND (? IS NULL OR d.dep_id = ?)`,
+      [dias, dias, depId, depId]
     );
-    const total = Number(rows[0].total) || 0;
-    const conVenta = Number(rows[0].con_venta) || 0;
-    res.json({ ok: true, dias, productos: total, con_venta: conVenta, en_cero: total - conVenta, afectados, agregados });
+    agregados += ins.affectedRows;
+
+    // 3b) Teja Food: los nuevos se asignan por la CAJA de venta (unidad_negocio).
+    //     TIENDA → Local (1347) · SALA → Sala (2347). Vendido en ambas → se crea en las dos.
+    const { rows: insTF } = await db.query(
+      `INSERT IGNORE INTO productos (pro_codigo_plu, pro_codigo_barra, pro_nombre_producto, vta_total_periodo, dias_historial, dep_id)
+       SELECT CAST(v.pro_codigo_plu AS CHAR), dp.pro_codigo_barra, dp.pro_nombre_producto, ROUND(v.u, 2), ?,
+              CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
+         FROM (
+           SELECT fv.pro_codigo_plu, fv.unidad_negocio, SUM(fv.cantidad_unidades) AS u
+             FROM db_analitica_supermercado.fact_ventas fv
+            WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
+              AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
+              AND fv.pro_codigo_plu IS NOT NULL
+              AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
+            GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
+         ) v
+         JOIN db_analitica_supermercado.dim_productos dp ON dp.pro_codigo_plu = v.pro_codigo_plu
+         LEFT JOIN productos p2 ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p2.pro_codigo_plu
+            AND p2.dep_id = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END
+        WHERE p2.pro_codigo_plu IS NULL
+          AND (? IS NULL OR ? = CASE v.unidad_negocio WHEN 'TEJA FOOD TIENDA' THEN '1347' WHEN 'TEJA FOOD SALA' THEN '2347' END)`,
+      [dias, dias, depId, depId]
+    );
+    agregados += insTF.affectedRows;
+  }
+
+  const { rows } = await db.query(
+    `SELECT COUNT(*) AS total, SUM(vta_total_periodo > 0) AS con_venta
+       FROM productos WHERE (? IS NULL OR dep_id = ?)`,
+    [depId, depId]
+  );
+  const total = Number(rows[0].total) || 0;
+  const conVenta = Number(rows[0].con_venta) || 0;
+  return { ok: true, dias, productos: total, con_venta: conVenta, en_cero: total - conVenta, afectados, agregados };
+}
+
+// POST /api/admin/actualizar-demanda-ventas  { dias?, dep_id?, agregar_nuevos? }
+async function actualizarDemandaDesdeVentas(req, res) {
+  try {
+    let dias = parseInt(req.body?.dias, 10);
+    if (!Number.isFinite(dias) || dias < 1 || dias > 365) dias = 30;
+    const depId = (req.body?.dep_id && String(req.body.dep_id).trim()) || null;
+    const agregarNuevos = req.body?.agregar_nuevos === true || req.body?.agregar_nuevos === 'true' || req.body?.agregar_nuevos === 1;
+    res.json(await refrescarDemandaDesdeVentas({ dias, depId, agregarNuevos }));
   } catch (err) {
     console.error('[actualizarDemandaDesdeVentas]', err.message);
     res.status(500).json({ error: 'No se pudo actualizar la demanda desde ventas: ' + err.message });
@@ -1110,6 +1285,7 @@ module.exports = {
   listarUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario,
   obtenerConfig, actualizarConfig,
   subirCSV, actualizarDemandaDesdeVentas, actualizarDemandaVentasProducto,
+  refrescarDemandaDesdeVentas, obtenerVentaPlu,
   buscarProductos, listarProductosPorCategoria, obtenerProducto, actualizarProducto, exportarExcel,
   listarClasificacion, clasificarBulk,
   obtenerMasterProductos, actualizarMasterProductosBulk, eliminarMasterProductosBulk, activarProductosBulk, moverProductosBulk, exportarMasterExcel

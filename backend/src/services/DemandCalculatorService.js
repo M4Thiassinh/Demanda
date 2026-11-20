@@ -14,6 +14,11 @@
  *   demanda_total_requerida  = lote_produccion_base + stock_seguridad_calculado
  *   requerimiento_a_producir = demanda_total_requerida - det_stock_sala
  *   → Si <= 0: no se produce. Si > 0: Math.ceil()
+ *
+ * Excepción: si el producto tiene pro_demanda_override, esa es la demanda total y
+ * los pasos A–C solo sirven de referencia. Existe porque la venta diaria se
+ * recalcula sola cada día desde las ventas reales, y sin una columna aparte el
+ * ajuste manual del jefe de departamento se perdía en la siguiente actualización.
  */
 
 const r4 = (n) => Math.round(n * 10000) / 10000;
@@ -34,6 +39,8 @@ function resultadoVacio(min = 0) {
     loteProduccionBase:       0,
     stockSeguridadCalculado:  0,
     demandaTotalRequerida:    0,
+    demandaCalculada:         0,
+    demandaEsOverride:        false,
     requerimiento:            0,
     hayQuiebre:               false,
     cantidadAProducir:        0,
@@ -60,16 +67,34 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
     pro_dias_seguridad_override,
     pro_dias_elaboracion,
     pro_cantidad_minima,
+    pro_demanda_override,
   } = producto;
 
   const min = Math.max(0, Math.trunc(toFiniteNumber(pro_cantidad_minima, 0)));
+
+  // Demanda fijada a mano por el jefe de departamento. Se lee antes que nada porque
+  // manda incluso sobre un producto sin historial de ventas: si alguien dijo "de esto
+  // se piden 20", se piden 20 aunque el sistema no tenga con qué estimarlo.
+  const overrideRaw = toFiniteNumber(pro_demanda_override, NaN);
+  const hayOverride = Number.isFinite(overrideRaw) && overrideRaw >= 0;
 
   // ── Paso A — Venta diaria (protección contra división por cero / valores no numéricos) ──
   const ventas = toFiniteNumber(producto.vta_total_periodo, 0);
   const dias   = toFiniteNumber(producto.dias_historial, 0);
   if (dias <= 0) {
-    // Sin historial válido no se puede estimar la demanda: se devuelve resultado neutro.
-    return resultadoVacio(min);
+    // Sin historial válido no se puede estimar la demanda. Si hay override, igual se
+    // respeta; si no, resultado neutro.
+    if (!hayOverride) return resultadoVacio(min);
+    const stockSinHist   = toFiniteNumber(stockSala, 0);
+    const requerimiento  = overrideRaw - stockSinHist;
+    return {
+      ...resultadoVacio(min),
+      demandaTotalRequerida: r4(overrideRaw),
+      demandaEsOverride:     true,
+      requerimiento:         r4(requerimiento),
+      hayQuiebre:            requerimiento > 0,
+      cantidadAProducir:     requerimiento > 0 ? Math.ceil(requerimiento) : 0,
+    };
   }
   const ventaDiaria = ventas / dias;
 
@@ -92,7 +117,13 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
   // ── Paso C — Ecuación final ──
   const loteProduccionBase      = (ventaDiaria * 7) / diasProdEfectivo;
   const stockSeguridadCalculado = ventaDiaria * diasSegEfectivo;
-  const demandaTotalRequerida   = loteProduccionBase + stockSeguridadCalculado;
+  const demandaCalculada        = loteProduccionBase + stockSeguridadCalculado;
+
+  // Si el jefe fijó cuánto se pide, ese valor manda por sobre la fórmula. La venta
+  // diaria se recalcula sola todos los días, pero esto no se toca (por eso vive en su
+  // propia columna y no en vta_total_periodo).
+  const demandaTotalRequerida = hayOverride ? overrideRaw : demandaCalculada;
+
   const stock                   = toFiniteNumber(stockSala, 0);
   const requerimientoRaw        = demandaTotalRequerida - stock;
 
@@ -122,6 +153,9 @@ function calcularDemanda(config, producto, stockSala, revFecha) {
     loteProduccionBase:       r4(loteProduccionBase),
     stockSeguridadCalculado:  r4(stockSeguridadCalculado),
     demandaTotalRequerida:    r4(demandaTotalRequerida),
+    // Para que el panel pueda distinguir una demanda fijada a mano de una calculada.
+    demandaCalculada:         r4(demandaCalculada),
+    demandaEsOverride:        hayOverride,
     requerimiento:            r4(requerimientoRaw),
     hayQuiebre,
     cantidadAProducir,

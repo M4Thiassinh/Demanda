@@ -119,3 +119,57 @@ const db = require('./config/db');
   console.log(`⏰ Correo diario Teja Food: desde las ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')} se envía apenas el pedido del día esté completo (America/Santiago)`);
 })();
 
+// ── Tarea programada: venta diaria automática ────────────────
+// Una vez al día recalcula vta_total_periodo de TODOS los productos con las ventas
+// reales de los últimos 30 días. Antes esto era un botón que alguien tenía que
+// acordarse de apretar; ahora la venta diaria está bloqueada en el panel y es el
+// sistema el que la mantiene al día.
+//
+// NO toca pro_demanda_override: si un jefe de departamento fijó cuánto se pide de un
+// producto, ese valor sobrevive a esta actualización (es justamente para eso que
+// vive en su propia columna).
+//
+// Misma lógica de reloj que el correo: hora local del SO, no Intl, porque el Node
+// del servidor tiene datos de zona horaria desactualizados.
+const { refrescarDemandaDesdeVentas } = require('./controllers/admin.controller');
+(function iniciarVentaDiariaAutomatica() {
+  const HORA  = parseInt(process.env.DEMANDA_HORA_ACTUALIZACION || '6', 10);
+  const MIN   = parseInt(process.env.DEMANDA_MIN_ACTUALIZACION  || '0', 10);
+  const DIAS  = parseInt(process.env.DEMANDA_DIAS_HISTORIAL     || '30', 10);
+  const CLAVE = 'demanda_ultima_actualizacion';
+
+  const yaCorrioHoy = async (hoy) => {
+    try {
+      const { rows } = await db.query('SELECT valor FROM app_estado WHERE clave = ?', [CLAVE]);
+      return rows.length > 0 && rows[0].valor === hoy;
+    } catch (e) {
+      // Si no se puede leer la marca, mejor NO correr: repetir el cálculo no rompe
+      // nada, pero tampoco queremos machacar la base cada minuto si algo anda mal.
+      console.error('[Demanda] No se pudo leer app_estado:', e.message);
+      return true;
+    }
+  };
+
+  const chequear = async () => {
+    try {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const hoy = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const h = now.getHours(), m = now.getMinutes();
+
+      if (!(h > HORA || (h === HORA && m >= MIN))) return;
+      if (await yaCorrioHoy(hoy)) return;
+
+      const r = await refrescarDemandaDesdeVentas({ dias: DIAS });
+      await db.query(
+        `INSERT INTO app_estado (clave, valor) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+        [CLAVE, hoy]
+      );
+      console.log(`[Demanda] ${hoy}: venta diaria actualizada con los últimos ${DIAS} días · ${r.productos} productos (${r.con_venta} con venta, ${r.en_cero} en cero).`);
+    } catch (e) { console.error('[Demanda] Error en la actualización diaria:', e.message); }
+  };
+  setInterval(chequear, 60 * 1000);
+  console.log(`⏰ Venta diaria automática: a las ${String(HORA).padStart(2, '0')}:${String(MIN).padStart(2, '0')} se recalcula con los últimos ${DIAS} días`);
+})();
+

@@ -34,26 +34,14 @@ const demandaDe = (row, ventaDiaria) => {
   return vd * (7 / diasProdDe(row) + diasSegDe(row, vd))
 }
 
-// Despeja la venta diaria necesaria para alcanzar una demanda total objetivo.
-// Ojo: cuando los días de seguridad son automáticos la relación NO es continua, porque
-// al superar las 20 u/día el stock de seguridad baja de 2 días a 1. En esa zona hay dos
-// ventas diarias que dan la misma demanda; se elige la más cercana a la que el producto
-// ya tenía, que es el cambio menos sorpresivo.
-const ventaDiariaParaDemanda = (row, demandaObjetivo, ventaDiariaActual) => {
-  const D = num(demandaObjetivo, 0)
-  if (D <= 0) return 0
-  const p = diasProdDe(row)
-  const ov = row.pro_dias_seguridad_override
-  const seg = (ov !== null && ov !== undefined && ov !== '') ? parseInt(ov, 10) : NaN
-  if (Number.isFinite(seg) && seg >= 0) return D / (7 / p + seg)
+// ¿La demanda de este producto está fijada a mano?
+const tieneOverride = (row) =>
+  row.pro_demanda_override !== null && row.pro_demanda_override !== undefined && row.pro_demanda_override !== ''
 
-  const candidatos = [1, 2]
-    .map((s) => D / (7 / p + s))
-    .filter((vd, i) => (i === 0 ? vd > 20 : vd <= 20))
-  if (!candidatos.length) return D / (7 / p + 2) // zona sin solución exacta: rama conservadora
-  const actual = num(ventaDiariaActual, 0)
-  return candidatos.reduce((a, b) => (Math.abs(b - actual) < Math.abs(a - actual) ? b : a))
-}
+// Demanda que se muestra: la fijada a mano si existe, si no la de la fórmula.
+// La fórmula se evalúa en vivo para que al cambiar los días se vea al instante.
+const demandaMostrada = (row) =>
+  tieneOverride(row) ? num(row.pro_demanda_override, 0) : demandaDe(row, row.ventaDiaria)
 
 export default function MasterAdminPanel() {
   // Autenticación Master
@@ -87,6 +75,32 @@ export default function MasterAdminPanel() {
     pro_dias_seguridad_override: '',
     pro_cantidad_minima: 0
   });
+
+  // Venta leída de la analítica para el producto que se está creando.
+  const [ventaAlta, setVentaAlta] = useState(null);
+  const [cargandoVenta, setCargandoVenta] = useState(false);
+
+  // Al salir del campo PLU se consultan sus ventas de los últimos 30 días. De paso se
+  // completan nombre y código de barra desde el maestro de la analítica si están
+  // vacíos, para no tipearlos a mano.
+  const leerVentaDelPlu = async (plu) => {
+    const limpio = String(plu || '').trim();
+    if (!limpio || !depSel) { setVentaAlta(null); return; }
+    setCargandoVenta(true);
+    try {
+      const { getVentaPlu } = await import('../../api');
+      const v = await getVentaPlu(limpio, depSel, 30);
+      setVentaAlta(v);
+      setNewProd(prev => ({
+        ...prev,
+        pro_nombre_producto: prev.pro_nombre_producto || v.nombre || '',
+        pro_codigo_barra:    prev.pro_codigo_barra    || v.barra  || '',
+      }));
+    } catch {
+      setVentaAlta(null);
+      Swal.fire('Sin datos', 'No se pudieron leer las ventas de ese PLU', 'warning');
+    } finally { setCargandoVenta(false); }
+  };
 
   // Cargar departamentos al montar
   useEffect(() => {
@@ -176,39 +190,21 @@ export default function MasterAdminPanel() {
     setEdits(prev => ({ ...prev, [plu]: { ...prev[plu], ...cambios } }));
   };
 
-  // Venta diaria → demanda total (y la venta del período, que es lo que se guarda).
-  const editarVentaDiaria = (plu, row, valor) => {
-    const vd = parseFloat(valor);
-    const dias = num(row.dias_historial, 30) || 30;
-    if (isNaN(vd)) return handleEditMulti(plu, { ventaDiaria: '', vta_total_periodo: 0, demandaTotalRequerida: 0 });
-    handleEditMulti(plu, {
-      ventaDiaria: vd,
-      vta_total_periodo: Number((vd * dias).toFixed(2)),
-      demandaTotalRequerida: Number(demandaDe(row, vd).toFixed(2)),
-    });
-  };
-
-  // Demanda total → venta diaria (camino inverso, para fijar directo cuánto se pide).
-  const editarDemandaTotal = (plu, row, valor) => {
+  // Fijar a mano la demanda total. Ya no se despeja la venta diaria hacia atrás: la
+  // venta la mantiene el sistema (se recalcula sola cada día con los últimos 30 días)
+  // y lo que el jefe impone va a su propia columna, que la tarea diaria no toca.
+  // Dejar el campo vacío borra el override y el producto vuelve al valor automático.
+  const editarDemandaTotal = (plu, valor) => {
     const d = parseFloat(valor);
-    if (isNaN(d)) return handleEditMulti(plu, { demandaTotalRequerida: '' });
-    const vd = ventaDiariaParaDemanda(row, d, row.ventaDiaria);
-    const dias = num(row.dias_historial, 30) || 30;
-    handleEditMulti(plu, {
-      demandaTotalRequerida: d,
-      ventaDiaria: Number(vd.toFixed(2)),
-      vta_total_periodo: Number((vd * dias).toFixed(2)),
-    });
+    handleEditMulti(plu, { pro_demanda_override: isNaN(d) ? null : d });
   };
 
-  // Cambiar los días (producción o seguridad) mueve la demanda, no la venta diaria.
-  const editarDias = (plu, row, campo, valor) => {
-    const fila = { ...row, [campo]: valor };
-    handleEditMulti(plu, {
-      [campo]: valor,
-      demandaTotalRequerida: Number(demandaDe(fila, row.ventaDiaria).toFixed(2)),
-    });
-  };
+  // Volver al cálculo automático (equivale a vaciar el campo).
+  const volverAutomatico = (plu) => handleEditMulti(plu, { pro_demanda_override: null });
+
+  // Cambiar los días solo mueve la demanda CALCULADA; si hay una fijada a mano,
+  // esa sigue mandando y el número mostrado no cambia.
+  const editarDias = (plu, campo, valor) => handleEditMulti(plu, { [campo]: valor });
 
   const hasEdits = Object.keys(edits).length > 0;
 
@@ -347,11 +343,17 @@ export default function MasterAdminPanel() {
     }
     
     const fakeId = `nuevo_${Date.now()}`;
+    // La venta sale de lo leído en la analítica, no de lo que escriba el usuario.
+    // Esto es solo para mostrarlo en la tabla: al guardar, el servidor la vuelve a
+    // leer por su cuenta, así que es él quien tiene la última palabra.
     const newEntry = {
       ...newProd,
       pro_codigo_plu: String(newProd.pro_codigo_plu),
-      vta_total_periodo: newProd.vta_total_periodo || 0,
-      dias_historial: newProd.dias_historial || 30,
+      vta_total_periodo: ventaAlta?.unidades ?? 0,
+      dias_historial: ventaAlta?.dias ?? 30,
+      ventaDiaria: ventaAlta?.ventaDiaria ?? 0,
+      dias_produccion_semana: productos[0]?.dias_produccion_semana ?? 6,
+      pro_demanda_override: null,
       pro_cantidad_minima: newProd.pro_cantidad_minima || 0
     };
     
@@ -364,6 +366,7 @@ export default function MasterAdminPanel() {
     // Lo metemos visualmente a la lista de productos
     setProductos(prev => [newEntry, ...prev]);
     setShowAddModal(false);
+    setVentaAlta(null);
     setNewProd({
       pro_codigo_plu: '', pro_codigo_barra: '', pro_nombre_producto: '',
       vta_total_periodo: '', dias_historial: 30, pro_dias_produccion_override: '',
@@ -502,10 +505,10 @@ export default function MasterAdminPanel() {
                   </th>
                   <th className="p-3 w-20">PLU</th>
                   <th className="p-3 min-w-[200px]">Nombre del Producto</th>
-                  <th className="p-3 w-28 text-center" title="Venta diaria calculada">Vta. Diaria</th>
+                  <th className="p-3 w-28 text-center" title="Automatica: se recalcula cada dia con las ventas reales de los ultimos 30 dias">Vta. Diaria 🔒</th>
                   <th className="p-3 w-28 text-center" title="Factor de ajuste semanal (Días Prod)">Fact. Prod</th>
                   <th className="p-3 w-28 text-center" title="Stock de Seguridad Crítico (Días)">Días Seguridad</th>
-                  <th className="p-3 w-28 text-center" title="Cuánto se pide con stock 0. Se puede editar: al cambiarla se ajusta sola la venta diaria">Dda Total ✎</th>
+                  <th className="p-3 w-28 text-center" title="Cuanto se pide con stock 0. Editable: lo que fijes aqui no lo pisa la actualizacion diaria">Dda Total ✎</th>
                   <th className="p-3 w-28 text-center" title="Requerimiento mínimo (Lote)">Req. Mínimo</th>
                 </tr>
               </thead>
@@ -551,22 +554,17 @@ export default function MasterAdminPanel() {
                             className="w-full bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none transition-colors"
                           />
                         </td>
-                        <td className="p-2 w-28 text-center">
-                          <input 
-                            type="number" 
-                            step="0.1"
-                            value={mostrar1Dec(current.ventaDiaria, `${localId}:vd`)}
-                            onChange={e => { setFocusCampo(`${localId}:vd`); editarVentaDiaria(localId, current, e.target.value); }}
-                            onBlur={() => setFocusCampo(null)}
-                            className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-emerald-300 font-mono"
-                            placeholder="0.0"
-                          />
+                        {/* Venta diaria: solo lectura. La mantiene el sistema con las
+                            ventas reales de los últimos 30 días (tarea diaria 06:00). */}
+                        <td className="p-3 w-28 text-center text-emerald-300/80 font-mono"
+                            title="Automática: se recalcula cada día con las ventas de los últimos 30 días">
+                          {r1(current.ventaDiaria).toFixed(1)}
                         </td>
                         <td className="p-2">
                           <input 
                             type="number" 
                             value={current.pro_dias_produccion_override ?? ''}
-                            onChange={e => editarDias(localId, current, 'pro_dias_produccion_override', e.target.value)}
+                            onChange={e => editarDias(localId, 'pro_dias_produccion_override', e.target.value)}
                             className="w-full text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none text-sky-300"
                             placeholder="Auto"
                           />
@@ -575,22 +573,39 @@ export default function MasterAdminPanel() {
                           <input 
                             type="number" 
                             value={current.pro_dias_seguridad_override ?? ''}
-                            onChange={e => editarDias(localId, current, 'pro_dias_seguridad_override', e.target.value)}
+                            onChange={e => editarDias(localId, 'pro_dias_seguridad_override', e.target.value)}
                             className="w-full text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-2 py-1 outline-none text-rose-300"
                             placeholder="Auto"
                           />
                         </td>
+                        {/* Demanda total: editable. Si se fija a mano queda marcada en
+                            ámbar y la actualización diaria ya no la pisa. */}
                         <td className="p-2 w-28 text-center">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={mostrar1Dec(current.demandaTotalRequerida, `${localId}:dda`)}
-                            onChange={e => { setFocusCampo(`${localId}:dda`); editarDemandaTotal(localId, current, e.target.value); }}
-                            onBlur={() => setFocusCampo(null)}
-                            className="w-20 text-center bg-transparent border border-transparent focus:border-brand-500 rounded px-1 py-1 outline-none text-brand-400 font-bold font-mono"
-                            placeholder="0.0"
-                            title="Editable: al cambiarla se ajusta sola la venta diaria"
-                          />
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={mostrar1Dec(demandaMostrada(current), `${localId}:dda`)}
+                              onChange={e => { setFocusCampo(`${localId}:dda`); editarDemandaTotal(localId, e.target.value); }}
+                              onBlur={() => setFocusCampo(null)}
+                              className={`w-16 text-center bg-transparent border rounded px-1 py-1 outline-none font-bold font-mono transition-colors ${
+                                tieneOverride(current)
+                                  ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                                  : 'border-transparent focus:border-brand-500 text-brand-400'
+                              }`}
+                              placeholder="0.0"
+                              title={tieneOverride(current)
+                                ? `Fijada a mano. El automático sería ${r1(demandaDe(current, current.ventaDiaria)).toFixed(1)}. Vacía el campo para volver al automático.`
+                                : 'Automática. Escribe un valor para fijarla y que no la pise la actualización diaria.'}
+                            />
+                            {tieneOverride(current) && (
+                              <button type="button" onClick={() => volverAutomatico(localId)}
+                                title="Volver al valor automático"
+                                className="text-[10px] text-amber-400/70 hover:text-amber-200 leading-none px-1">
+                                ✕
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="p-2">
                           <input 
@@ -621,7 +636,9 @@ export default function MasterAdminPanel() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">PLU</label>
-                  <input required type="text" className="input-field" value={newProd.pro_codigo_plu} onChange={e => setNewProd({...newProd, pro_codigo_plu: e.target.value})} />
+                  <input required type="text" className="input-field" value={newProd.pro_codigo_plu}
+                    onChange={e => { setNewProd({...newProd, pro_codigo_plu: e.target.value}); setVentaAlta(null); }}
+                    onBlur={e => leerVentaDelPlu(e.target.value)} />
                 </div>
                 <div>
                   <label className="label">Cód. Barra (Opc)</label>
@@ -632,76 +649,67 @@ export default function MasterAdminPanel() {
                 <label className="label">Nombre del Producto</label>
                 <input required type="text" className="input-field" value={newProd.pro_nombre_producto} onChange={e => setNewProd({...newProd, pro_nombre_producto: e.target.value})} />
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="label text-xs">Venta Diaria Prom.</label>
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    className="input-field text-emerald-300 font-semibold" 
-                    value={newProd.ventaDiaria || ''} 
-                    onChange={e => {
-                      const v = parseFloat(e.target.value);
-                      const d = parseInt(newProd.dias_historial) || 30;
-                      setNewProd({
-                        ...newProd,
-                        ventaDiaria: e.target.value,
-                        vta_total_periodo: isNaN(v) ? '' : String((v * d).toFixed(2))
-                      });
-                    }} 
-                    placeholder="Ej: 2.1" 
-                  />
+              {/* La venta ya no se escribe a mano: se lee de las ventas reales de los
+                  últimos 30 días al salir del campo PLU, igual que hace la
+                  actualización diaria. Al guardar, el servidor la vuelve a leer. */}
+              <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label text-xs mb-0">
+                    Venta diaria · {ventaAlta ? `últimos ${ventaAlta.dias} días` : 'últimos 30 días'}
+                  </label>
+                  {cargandoVenta && <span className="text-[11px] text-gray-500">leyendo ventas…</span>}
                 </div>
-                <div>
-                  <label className="label text-xs">Venta Total Período</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    className="input-field" 
-                    value={newProd.vta_total_periodo} 
-                    onChange={e => {
-                      const vt = parseFloat(e.target.value);
-                      const d = parseInt(newProd.dias_historial) || 30;
-                      setNewProd({
-                        ...newProd,
-                        vta_total_periodo: e.target.value,
-                        ventaDiaria: isNaN(vt) ? '' : String((vt / d).toFixed(2))
-                      });
-                    }} 
-                    placeholder="0" 
-                  />
-                </div>
-                <div>
-                  <label className="label text-xs">Días Período</label>
-                  <input 
-                    type="number" 
-                    className="input-field" 
-                    value={newProd.dias_historial} 
-                    onChange={e => {
-                      const d = parseInt(e.target.value) || 30;
-                      const vd = parseFloat(newProd.ventaDiaria);
-                      setNewProd({
-                        ...newProd,
-                        dias_historial: e.target.value,
-                        vta_total_periodo: isNaN(vd) ? newProd.vta_total_periodo : String((vd * d).toFixed(2))
-                      });
-                    }} 
-                    placeholder="30" 
-                  />
-                </div>
+                <p className="text-2xl font-bold font-mono text-emerald-300">
+                  {ventaAlta ? r1(ventaAlta.ventaDiaria).toFixed(1) : '—'}
+                  <span className="text-xs font-sans font-normal text-gray-500 ml-2">
+                    {ventaAlta ? `(${ventaAlta.unidades} unid. en ${ventaAlta.dias} días)` : 'escribe el PLU'}
+                  </span>
+                </p>
+                {/* Producto nuevo: se divide por los días que lleva vendiéndose, no
+                    por 30, porque si no su venta diaria saldría muy por debajo. */}
+                {ventaAlta && ventaAlta.esNuevo && (
+                  <p className="text-[11px] text-sky-300 mt-1">
+                    🆕 Producto nuevo: vende desde el {ventaAlta.primeraVenta}, así que
+                    se divide por {ventaAlta.dias} días y no por {ventaAlta.diasPedidos}.
+                  </p>
+                )}
+                {ventaAlta && ventaAlta.unidades === 0 && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    Este PLU no registra ventas en los últimos 30 días. El producto se
+                    creará igual, con venta 0.
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-500 mt-1">
+                  🔒 La calcula el sistema y se actualiza sola cada día.
+                </p>
               </div>
               <div>
                 <label className="label">Req. Mínimo de Producción</label>
                 <input type="number" className="input-field text-brand-300" value={newProd.pro_cantidad_minima} onChange={e => setNewProd({...newProd, pro_cantidad_minima: e.target.value})} placeholder="0" />
               </div>
+              {/* Debajo de cada campo se muestra el número que se usaría si se deja
+                  vacío, para que "Auto" deje de ser una incógnita. Los días de
+                  seguridad dependen de la venta, así que aparecen al leer el PLU. */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Días Stock (Opc)</label>
                   <input type="number" className="input-field text-rose-300" value={newProd.pro_dias_seguridad_override} onChange={e => setNewProd({...newProd, pro_dias_seguridad_override: e.target.value})} placeholder="Auto" />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {ventaAlta
+                      ? <>Auto = <span className="text-rose-300 font-mono font-semibold">{ventaAlta.dias_seg_auto}</span>{' '}
+                          <span className="text-gray-600">({ventaAlta.ventaDiaria > 20 ? 'más' : 'hasta'} 20 u/día)</span></>
+                      : 'Auto: se calcula según la venta'}
+                  </p>
                 </div>
                 <div>
                   <label className="label">Días Prod. (Opc)</label>
                   <input type="number" className="input-field text-sky-300" value={newProd.pro_dias_produccion_override} onChange={e => setNewProd({...newProd, pro_dias_produccion_override: e.target.value})} placeholder="Auto" />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {ventaAlta
+                      ? <>Auto = <span className="text-sky-300 font-mono font-semibold">{ventaAlta.dias_prod_auto}</span>{' '}
+                          <span className="text-gray-600">(config. del depto)</span></>
+                      : 'Auto: días de producción del depto'}
+                  </p>
                 </div>
               </div>
               

@@ -65,6 +65,9 @@ export const updateConfig = (depId, data) => api.put(`/admin/config/${depId}`, d
 export const subirCSV = (fd) => api.post('/admin/csv-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
 export const actualizarDemandaVentas = (dias, depId, agregarNuevos) => api.post('/admin/actualizar-demanda-ventas', { dias, dep_id: depId || undefined, agregar_nuevos: !!agregarNuevos }).then(r => r.data)
 export const actualizarDemandaVentasProducto = (plu, depId, dias) => api.post('/admin/actualizar-demanda-ventas-producto', { plu, dep_id: depId, dias }).then(r => r.data)
+// Lo vendido de un PLU en los últimos N días (+ nombre y código de barra del maestro
+// de la analítica). Alimenta el formulario de alta: la venta ya no se escribe a mano.
+export const getVentaPlu = (plu, depId, dias = 30) => api.get('/admin/venta-plu', { params: { plu, dep_id: depId, dias } }).then(r => r.data)
 export const getProducto = (plu, depId) => api.get(`/admin/productos/${plu}`, { params: { dep_id: depId } }).then(r => r.data)
 export const updateProducto = (plu, depId, data) => api.put(`/admin/productos/${plu}`, { ...data, dep_id: depId }).then(r => r.data)
 // params: { dep_id, fecha_ini, fecha_fin, vta_ini, vta_fin, mer_ini, mer_fin }
