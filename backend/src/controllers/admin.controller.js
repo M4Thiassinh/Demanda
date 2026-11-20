@@ -949,7 +949,7 @@ async function ventasUltimosDias(plu, depId, dias = 30) {
        FROM db_analitica_supermercado.fact_ventas fv
       WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
         AND fv.id_fecha <  CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-        AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+        AND fv.pro_codigo_plu = ?
         AND (? IS NULL OR fv.unidad_negocio = ?)`,
     [dias, String(plu), unidad, unidad]
   );
@@ -963,7 +963,7 @@ async function ventasUltimosDias(plu, depId, dias = 30) {
   const { rows: pv } = await db.query(
     `SELECT STR_TO_DATE(MIN(fv.id_fecha), '%Y%m%d') AS primera
        FROM db_analitica_supermercado.fact_ventas fv
-      WHERE CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+      WHERE fv.pro_codigo_plu = ?
         AND (? IS NULL OR fv.unidad_negocio = ?)`,
     [String(plu), unidad, unidad]
   );
@@ -1007,7 +1007,7 @@ async function obtenerVentaPlu(req, res) {
     const { rows: dim } = await db.query(
       `SELECT pro_nombre_producto AS nombre, pro_codigo_barra AS barra
          FROM db_analitica_supermercado.dim_productos
-        WHERE CAST(pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+        WHERE pro_codigo_plu = ?
         LIMIT 1`,
       [plu]
     );
@@ -1236,7 +1236,7 @@ async function actualizarDemandaVentasProducto(req, res) {
               WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
                 AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
                 AND fv.unidad_negocio IN ('TEJA FOOD TIENDA','TEJA FOOD SALA')
-                AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+                AND fv.pro_codigo_plu = ?
               GROUP BY fv.pro_codigo_plu, fv.unidad_negocio
            ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
               AND v.unidad_negocio = CASE p.dep_id WHEN '1347' THEN 'TEJA FOOD TIENDA' WHEN '2347' THEN 'TEJA FOOD SALA' END
@@ -1253,7 +1253,7 @@ async function actualizarDemandaVentasProducto(req, res) {
                FROM db_analitica_supermercado.fact_ventas fv
               WHERE fv.id_fecha >= CAST(DATE_FORMAT(CURDATE() - INTERVAL ? DAY, '%Y%m%d') AS UNSIGNED)
                 AND fv.id_fecha < CAST(DATE_FORMAT(CURDATE(), '%Y%m%d') AS UNSIGNED)
-                AND CAST(fv.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = ?
+                AND fv.pro_codigo_plu = ?
               GROUP BY fv.pro_codigo_plu
            ) v ON CAST(v.pro_codigo_plu AS CHAR) COLLATE utf8mb4_unicode_ci = p.pro_codigo_plu
             SET p.vta_total_periodo = ROUND(COALESCE(v.u, 0), 2), p.dias_historial = ?
